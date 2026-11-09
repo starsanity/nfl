@@ -1,0 +1,3021 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NFL Analyzer - Spread, ML & Total Consensus</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Vue 3 -->
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <!-- PapaParse for CSV parsing -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+    <!-- Firebase Compat SDKs for Instant Standalone Real-Time Cloud Sync -->
+    <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+    <!-- Google Fonts: Inter & JetBrains Mono -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background-color: #070b14;
+            color: #f1f5f9;
+        }
+        [v-cloak] {
+            display: none !important;
+        }
+        .font-mono-num {
+            font-family: 'JetBrains Mono', monospace;
+        }
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #0b1120;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #334155;
+            border-radius: 3px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #475569;
+        }
+        .glass-panel {
+            background: rgba(15, 23, 42, 0.85);
+            backdrop-filter: blur(12px);
+        }
+    </style>
+</head>
+<body class="min-h-screen bg-slate-950 text-slate-100 antialiased selection:bg-emerald-500 selection:text-slate-950">
+
+<div id="app" v-cloak class="max-w-md md:max-w-4xl lg:max-w-6xl mx-auto min-h-screen flex flex-col bg-slate-900/60 border-x border-slate-800/80 shadow-2xl">
+    
+    <!-- Toast Notification Message Box -->
+    <div v-if="toastMessage" class="fixed bottom-5 right-5 z-50 transition-all duration-300 transform translate-y-0">
+        <div class="px-4 py-3 rounded-xl shadow-2xl flex items-center gap-3 border text-xs font-semibold"
+             :class="toastType === 'success' ? 'bg-emerald-950/95 text-emerald-200 border-emerald-600/60' : 'bg-slate-900/95 text-slate-200 border-slate-700'">
+            <span>{{ toastMessage }}</span>
+            <button @click="toastMessage = ''" class="text-slate-400 hover:text-white font-bold ml-2">✕</button>
+        </div>
+    </div>
+
+    <!-- Top Header & Branding -->
+    <header class="sticky top-0 z-30 glass-panel border-b border-slate-800 px-3 sm:px-5 py-3">
+        <div class="flex items-center justify-between gap-3">
+            <div class="flex items-center gap-2.5">
+                <div class="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-br from-emerald-500 via-teal-600 to-cyan-700 flex items-center justify-center shadow-lg shadow-emerald-500/20 text-white font-black text-lg shrink-0">
+                    🏈
+                </div>
+                <div>
+                    <div class="flex items-center gap-2">
+                        <h1 class="text-base sm:text-lg font-black tracking-tight text-white leading-tight">NFL Analyzer</h1>
+                        <span class="text-[9px] sm:text-[10px] font-extrabold uppercase tracking-wider px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                            v1.0
+                        </span>
+                    </div>
+                    <p class="text-[11px] text-slate-400 hidden sm:block">Consensus Model Analytics &bull; Spread, Moneyline &amp; Total Recommendations</p>
+                </div>
+            </div>
+
+            <!-- Top Header Action Controls -->
+            <div class="flex items-center gap-2">
+                <button 
+                    v-if="liveGamesCount > 0"
+                    @click="quickFilter = quickFilter === 'live' ? 'all' : 'live'"
+                    class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] sm:text-xs font-black bg-rose-500/20 text-rose-300 border border-rose-500/40 animate-pulse cursor-pointer shadow-sm"
+                    title="Filter to NFL games currently in progress"
+                >
+                    <span class="w-1.5 h-1.5 rounded-full bg-rose-400"></span>
+                    <span>{{ liveGamesCount }} LIVE</span>
+                </button>
+
+                <!-- Cloud Synchronization Status Badge -->
+                <div class="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg text-[10px] font-bold border transition"
+                     :class="cloudSyncStatus === 'synced' ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30' : (cloudSyncStatus === 'syncing' ? 'bg-amber-500/15 text-amber-300 border-amber-500/30' : 'bg-slate-800 text-slate-400 border-slate-700')"
+                     title="Automated Real-Time Cloud Storage">
+                    <span class="w-1.5 h-1.5 rounded-full"
+                          :class="cloudSyncStatus === 'synced' ? 'bg-emerald-400' : (cloudSyncStatus === 'syncing' ? 'bg-amber-400 animate-pulse' : 'bg-slate-500')"></span>
+                    <span class="hidden sm:inline font-mono-num">{{ cloudSyncStatus === 'synced' ? 'Cloud Synced' : (cloudSyncStatus === 'syncing' ? 'Syncing Cloud...' : 'Cloud Ready') }}</span>
+                    <span class="sm:hidden font-mono-num">☁️</span>
+                </div>
+
+                <!-- Refresh Sync Button -->
+                <button 
+                    @click="fetchAllData"
+                    :disabled="loading"
+                    class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition"
+                    title="Re-sync Spread, ML & Total sheets"
+                >
+                    <span :class="{'animate-spin': loading}">🔄</span>
+                    <span class="hidden sm:inline">{{ loading ? 'Syncing...' : 'Sync Sheets' }}</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- Navigation Tabs -->
+        <div class="grid grid-cols-3 gap-1.5 mt-2.5 bg-slate-950/80 p-1 rounded-xl border border-slate-800">
+            <button 
+                @click="activeTab = 'matchups'"
+                class="py-2 px-1 rounded-lg text-[11px] sm:text-xs font-black tracking-tight transition flex items-center justify-center gap-1.5 min-w-0"
+                :class="activeTab === 'matchups' ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/25' : 'text-slate-400 hover:text-slate-200'"
+            >
+                <span>MATCHUPS</span>
+                <span class="px-1.5 py-0.2 text-[9px] sm:text-[10px] rounded-full font-mono-num shrink-0"
+                      :class="activeTab === 'matchups' ? 'bg-emerald-800/80 text-emerald-100' : 'bg-slate-800 text-slate-400'">
+                    {{ filteredGames.length }}
+                </span>
+            </button>
+            <button 
+                @click="activeTab = 'summary'"
+                class="py-2 px-1 rounded-lg text-[11px] sm:text-xs font-black tracking-tight transition flex items-center justify-center gap-1.5 min-w-0"
+                :class="activeTab === 'summary' ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/25' : 'text-slate-400 hover:text-slate-200'"
+            >
+                <span>SUMMARY</span>
+                <span class="px-1.5 py-0.2 text-[9px] sm:text-[10px] rounded-full font-mono-num shrink-0"
+                      :class="activeTab === 'summary' ? 'bg-emerald-800/80 text-emerald-100' : 'bg-slate-800 text-slate-400'">
+                    {{ summaryList.length }}
+                </span>
+            </button>
+            <button 
+                @click="activeTab = 'record'"
+                class="py-2 px-1 rounded-lg text-[11px] sm:text-xs font-black tracking-tight transition flex items-center justify-center gap-1.5 min-w-0"
+                :class="activeTab === 'record' ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/25' : 'text-slate-400 hover:text-slate-200'"
+            >
+                <span>LEDGER &amp; RECORD</span>
+                <span class="px-1.5 py-0.2 text-[9px] sm:text-[10px] rounded-full font-mono-num shrink-0"
+                      :class="activeTab === 'record' ? 'bg-emerald-800/80 text-emerald-100' : 'bg-slate-800 text-slate-400'">
+                    {{ allTimeOverallRecord.w }}-{{ allTimeOverallRecord.l }}-{{ allTimeOverallRecord.p }}
+                </span>
+            </button>
+        </div>
+    </header>
+
+    <!-- Main Content Area -->
+    <main class="flex-1 p-3 sm:p-4 space-y-4">
+
+        <!-- ==================== MATCHUPS TAB ==================== -->
+        <div v-if="activeTab === 'matchups'" class="space-y-4">
+            
+            <!-- Search & Filters Toolbar -->
+            <div class="bg-slate-900/90 border border-slate-800 rounded-xl p-3 space-y-3 shadow-sm">
+                <div class="flex flex-col sm:flex-row gap-2">
+                    <div class="relative flex-1">
+                        <svg class="w-4 h-4 text-slate-500 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+                        </svg>
+                        <input 
+                            type="text" 
+                            v-model="searchQuery" 
+                            placeholder="Search team, city, mascot, or abbrev... (e.g. Chiefs, KC, Ravens, Cowboys, SF, DET)"
+                            class="w-full pl-9 pr-8 py-2 bg-slate-950 border border-slate-800 rounded-lg text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition"
+                        >
+                        <button 
+                            v-if="searchQuery" 
+                            @click="searchQuery = ''"
+                            class="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 text-xs px-1"
+                        >
+                            ✕
+                        </button>
+                    </div>
+
+                    <!-- Market View Mode Switcher -->
+                    <div class="flex items-center gap-1 bg-slate-950 p-1 rounded-lg border border-slate-800 shrink-0">
+                        <button 
+                            v-for="mode in viewModes"
+                            :key="mode.id"
+                            @click="activeViewMode = mode.id"
+                            class="px-2.5 py-1 text-[11px] font-bold rounded-md transition"
+                            :class="activeViewMode === mode.id ? 'bg-slate-800 text-white shadow' : 'text-slate-400 hover:text-slate-200'"
+                        >
+                            {{ mode.label }}
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Quick Filters -->
+                <div class="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-slate-800/80">
+                    <div class="flex flex-wrap items-center gap-1.5">
+                        <button 
+                            v-for="f in filterOptions" 
+                            :key="f.id"
+                            @click="quickFilter = f.id"
+                            class="px-2.5 py-1 rounded-lg text-[11px] font-semibold transition cursor-pointer"
+                            :class="quickFilter === f.id ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40' : 'bg-slate-950 text-slate-400 hover:text-slate-200 border border-slate-800'"
+                        >
+                            {{ f.label }}
+                        </button>
+                    </div>
+
+                    <div class="text-[11px] text-slate-400 flex items-center gap-2">
+                        <span>Synced: <strong class="text-slate-300 font-mono-num">{{ lastSyncTime || 'Just now' }}</strong></span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Empty Search State -->
+            <div v-if="filteredGames.length === 0" class="bg-slate-900/60 border border-slate-800 rounded-xl p-8 text-center space-y-3">
+                <div class="text-3xl">🏈</div>
+                <div class="text-sm font-semibold text-slate-300">
+                    {{ searchQuery ? `No NFL matchups found matching "${searchQuery}"` : 'No games match your selected filter.' }}
+                </div>
+                <p class="text-xs text-slate-500 max-w-sm mx-auto">
+                    Try searching by city (e.g. Kansas City, Philadelphia), mascot (e.g. Chiefs, Eagles), abbreviation (e.g. KC, PHI), or reset filters.
+                </p>
+                <div class="flex justify-center gap-2 pt-2">
+                    <button @click="searchQuery = ''; quickFilter = 'all'" class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200">
+                        Reset Filters
+                    </button>
+                    <button @click="fetchAllData" class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white">
+                        Re-sync Sheets
+                    </button>
+                </div>
+            </div>
+
+            <!-- Matchup Cards Grid -->
+            <div class="grid grid-cols-1 gap-4">
+                <div 
+                    v-for="game in filteredGames" 
+                    :key="game.id"
+                    class="bg-slate-900 border border-slate-800 hover:border-slate-700/80 rounded-xl overflow-hidden shadow-lg transition flex flex-col justify-between"
+                >
+                    <div>
+                        <!-- Matchup Header -->
+                        <div 
+                            @click="game.showDeepDive = !game.showDeepDive"
+                            class="p-3.5 bg-slate-950/80 border-b border-slate-800 flex items-start justify-between gap-3 cursor-pointer hover:bg-slate-950 transition select-none"
+                            title="Click to toggle Matchup Deep-Dive"
+                        >
+                            <div class="space-y-1">
+                                <div class="flex items-center flex-wrap gap-2">
+                                    <span class="text-base sm:text-lg font-black text-white tracking-tight">{{ game.road }}</span>
+                                    <span class="text-xs font-bold px-1.5 py-0.5 rounded bg-slate-800 text-slate-400">
+                                        {{ game.neutral == 1 ? 'vs.' : '@' }}
+                                    </span>
+                                    <span class="text-base sm:text-lg font-black text-emerald-400 tracking-tight">{{ game.home }}</span>
+                                    <span 
+                                        v-if="game.neutral == 1" 
+                                        class="text-[9px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300 border border-purple-500/40"
+                                    >
+                                        NEUTRAL
+                                    </span>
+                                </div>
+                                <div class="text-[11px] text-slate-400 flex items-center gap-2 flex-wrap">
+                                    <span>Away: <strong class="text-slate-300">{{ game.awayRecord || getTeamRatings(game.road).record }}</strong></span>
+                                    <span>&bull;</span>
+                                    <span>Home: <strong class="text-slate-300">{{ game.homeRecord || getTeamRatings(game.home).record }}</strong></span>
+                                    <span v-if="game.kickoffFormatted">&bull;</span>
+                                    <span v-if="game.kickoffFormatted" class="text-sky-300 font-mono-num font-semibold">🕒 {{ game.kickoffFormatted }}</span>
+                                </div>
+                            </div>
+
+                            <!-- Live Market Lines Pill -->
+                            <div class="text-right shrink-0 space-y-1">
+                                <div class="flex items-center justify-end gap-1.5">
+                                    <span class="text-[10px] uppercase font-bold text-slate-400">Line:</span>
+                                    <span class="text-xs font-extrabold font-mono-num px-2 py-0.5 rounded bg-slate-800 text-slate-200 border border-slate-700">
+                                        {{ formatFavoredLabel(game) }}
+                                    </span>
+                                </div>
+                                <div class="flex items-center justify-end gap-1.5">
+                                    <span class="text-[10px] uppercase font-bold text-slate-400">Total:</span>
+                                    <span class="text-xs font-extrabold font-mono-num px-2 py-0.5 rounded bg-slate-800 text-amber-300 border border-slate-700">
+                                        {{ game.liveTotal !== null ? 'O/U ' + game.liveTotal : 'O/U OFF' }}
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Three Recommendation Modules (Spread, ML, Total) -->
+                        <div class="p-3.5 space-y-3">
+                            <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+
+                                <!-- 1. SPREAD RECOMMENDATION CARD -->
+                                <div v-if="activeViewMode === 'all' || activeViewMode === 'spread'" 
+                                     class="p-3 rounded-xl border transition flex flex-col justify-between"
+                                     :class="getSpreadBoxClasses(game.spreadResult)">
+                                    <div>
+                                        <div class="flex items-center justify-between gap-1.5 mb-1.5">
+                                            <span class="text-[10px] font-black uppercase tracking-wider text-slate-400 flex items-center gap-1">
+                                                <span>🏈</span> SPREAD PICK
+                                            </span>
+                                            <span class="px-1.5 py-0.2 rounded text-[9px] font-extrabold font-mono-num border"
+                                                  :class="getDeltaBadgeClass(game.spreadResult?.delta)">
+                                                Δ {{ formatDeltaNum(game.spreadResult?.delta) }} pts
+                                            </span>
+                                        </div>
+
+                                        <div class="space-y-1">
+                                            <div class="text-xs font-black tracking-tight flex items-center justify-between">
+                                                <div class="flex items-center gap-1.5 flex-wrap">
+                                                    <span class="text-white">{{ game.spreadResult?.finalAction }}</span>
+                                                    <span v-if="game.spreadResult?.t3Downgrade" class="text-[9px] px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 font-bold">
+                                                        ⚠️ T3 Contrarian
+                                                    </span>
+                                                </div>
+                                                <span class="font-mono-num text-xs px-2 py-0.5 rounded-lg bg-slate-950/80 text-emerald-300 border border-emerald-500/30">
+                                                    {{ game.spreadResult?.targetTeam }} {{ formatBetSpread(game.liveLine, game.spreadResult?.finalDir) }}
+                                                </span>
+                                            </div>
+                                            <p class="text-[10px] opacity-80 leading-relaxed">
+                                                Model Spread: <strong class="text-slate-200 font-mono-num">{{ formatMetric(game.spreadResult?.modelSpread) }}</strong> vs Market <strong class="text-slate-200 font-mono-num">{{ formatMetric(game.liveLine) }}</strong>
+                                            </p>
+                                        </div>
+                                    </div>
+
+                                    <!-- Tier edge snapshot -->
+                                    <div class="pt-2 mt-2 border-t border-white/10 flex items-center justify-between text-[10px] font-mono-num text-slate-400">
+                                        <span>T1 Edge: <strong class="text-slate-200">{{ game.spreadResult?.t1?.edge?.toFixed(1) || '0.0' }}</strong></span>
+                                        <span>Consensus: <strong class="text-slate-200">{{ game.spreadResult?.t1?.agreeCount }}/{{ game.spreadResult?.t1?.total }}</strong></span>
+                                    </div>
+                                </div>
+
+                                <!-- 2. MONEYLINE (ML) RECOMMENDATION CARD -->
+                                <div v-if="activeViewMode === 'all' || activeViewMode === 'ml'" 
+                                     class="p-3 rounded-xl border transition flex flex-col justify-between"
+                                     :class="getMlBoxClasses(game.mlResult)">
+                                    <div>
+                                        <div class="flex items-center justify-between gap-1.5 mb-1.5">
+                                            <span class="text-[10px] font-black uppercase tracking-wider text-slate-400 flex items-center gap-1">
+                                                <span>💰</span> MONEYLINE (ML)
+                                            </span>
+                                            <div class="flex items-center gap-1">
+                                                <span class="px-1.5 py-0.2 rounded text-[9px] font-extrabold font-mono-num border"
+                                                      :class="getMlDeltaBadgeClass(game.mlResult?.margin)">
+                                                    |Margin| {{ formatDeltaNum(game.mlResult?.margin) }} pts
+                                                </span>
+                                                <span class="px-1.5 py-0.2 rounded text-[9px] font-extrabold font-mono-num border bg-slate-800 text-slate-300 border-slate-700">
+                                                    EV {{ game.mlResult?.edgePct >= 0 ? '+' : '' }}{{ game.mlResult?.edgePct?.toFixed(1) }}%
+                                                </span>
+                                            </div>
+                                        </div>
+
+                                        <div class="space-y-1">
+                                            <div class="text-xs font-black tracking-tight flex items-center justify-between">
+                                                <div class="flex items-center gap-1.5 flex-wrap">
+                                                    <span class="text-white">{{ game.mlResult?.finalAction }}</span>
+                                                    <span v-if="game.mlResult?.isT1T2Split" class="text-[9px] px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 font-bold">
+                                                        ⚠️ T1 &amp; T2 Winner Split (Lean)
+                                                    </span>
+                                                </div>
+                                                <span class="font-mono-num text-xs px-2 py-0.5 rounded-lg bg-slate-950/80 text-amber-300 border border-amber-500/30">
+                                                    {{ game.mlResult?.targetTeam }} ({{ game.mlResult?.targetMlFormatted }})
+                                                </span>
+                                            </div>
+                                            <p class="text-[10px] opacity-80 leading-relaxed">
+                                                Model Win: <strong class="text-slate-200 font-mono-num">{{ game.mlResult?.modelWinProb?.toFixed(1) }}%</strong> vs Implied <strong class="text-slate-200 font-mono-num">{{ game.mlResult?.impliedWinProb?.toFixed(1) }}%</strong> &bull; Proj Margin: <strong class="text-slate-200 font-mono-num">{{ formatMetric(game.mlResult?.modelSpread) }}</strong>
+                                            </p>
+                                        </div>
+                                    </div>
+
+                                    <!-- Tier Consensus Snapshot -->
+                                    <div class="pt-2 mt-2 border-t border-white/10 flex items-center justify-between text-[10px] font-mono-num text-slate-400">
+                                        <span>T1: <strong class="text-slate-200">{{ game.mlResult?.t1?.agreeCount }}/{{ game.mlResult?.t1?.total }} ({{ game.mlResult?.t1?.dir }})</strong> &bull; Margin: <strong class="text-slate-200">{{ game.mlResult?.t1?.avgMargin?.toFixed(1) }} pts</strong></span>
+                                        <span>T2: <strong class="text-slate-200">{{ game.mlResult?.t2?.agreeCount }}/{{ game.mlResult?.t2?.total }} ({{ game.mlResult?.t2?.dir }})</strong></span>
+                                        <span :class="game.mlResult?.finalAction === 'STRONG BET' ? 'text-amber-400 font-bold' : 'text-slate-300'">
+                                            {{ game.mlResult?.finalAction }}
+                                        </span>
+                                    </div>
+                                </div>
+
+                                <!-- 3. TOTAL (OVER/UNDER) RECOMMENDATION CARD -->
+                                <div v-if="activeViewMode === 'all' || activeViewMode === 'total'" 
+                                     class="p-3 rounded-xl border transition flex flex-col justify-between"
+                                     :class="getTotalBoxClasses(game.totalResult)">
+                                    <div>
+                                        <div class="flex items-center justify-between gap-1.5 mb-1.5">
+                                            <span class="text-[10px] font-black uppercase tracking-wider text-slate-400 flex items-center gap-1">
+                                                <span>📊</span> TOTAL (O/U)
+                                            </span>
+                                            <span class="px-1.5 py-0.2 rounded text-[9px] font-extrabold font-mono-num border"
+                                                  :class="getTotalDeltaBadgeClass(game.totalResult?.delta)">
+                                                Δ {{ formatDeltaNum(game.totalResult?.delta) }} pts
+                                            </span>
+                                        </div>
+
+                                        <div class="space-y-1">
+                                            <div class="text-xs font-black tracking-tight flex items-center justify-between">
+                                                <div class="flex items-center gap-1.5 flex-wrap">
+                                                    <span class="text-white">{{ game.totalResult?.finalAction }}</span>
+                                                    <span v-if="game.totalResult?.t3Downgrade" class="text-[9px] px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 font-bold">
+                                                        ⚠️ T3 Contrarian
+                                                    </span>
+                                                </div>
+                                                <span class="font-mono-num text-xs px-2 py-0.5 rounded-lg bg-slate-950/80 text-cyan-300 border border-cyan-500/30">
+                                                    {{ game.totalResult?.pickText }}
+                                                </span>
+                                            </div>
+                                            <p class="text-[10px] opacity-80 leading-relaxed">
+                                                Model Total: <strong class="text-slate-200 font-mono-num">{{ game.totalResult?.modelTotal?.toFixed(1) }}</strong> vs Market <strong class="text-slate-200 font-mono-num">{{ game.liveTotal }}</strong>
+                                            </p>
+                                        </div>
+                                    </div>
+
+                                    <!-- Tier Consensus Snapshot for Totals -->
+                                    <div class="pt-2 mt-2 border-t border-white/10 flex items-center justify-between text-[10px] font-mono-num text-slate-400">
+                                        <span>T1: <strong class="text-slate-200">{{ game.totalResult?.t1?.agreeCount }}/{{ game.totalResult?.t1?.total }} ({{ game.totalResult?.t1?.dir }})</strong></span>
+                                        <span>T2: <strong class="text-slate-200">{{ game.totalResult?.t2?.agreeCount }}/{{ game.totalResult?.t2?.total }}</strong></span>
+                                        <span :class="game.totalResult?.direction === 'OVER' ? 'text-emerald-400 font-bold' : 'text-cyan-400 font-bold'">
+                                            Diff: {{ (game.totalResult?.delta || 0) > 0 ? '+' : '' }}{{ (game.totalResult?.delta || 0).toFixed(1) }} pts
+                                        </span>
+                                    </div>
+                                </div>
+
+                            </div>
+
+                            <!-- Live Score & Status Panel -->
+                            <div class="pt-2 border-t border-slate-800/80">
+                                <!-- IN PROGRESS LIVE -->
+                                <div v-if="isGameLive(game)" class="rounded-xl bg-slate-950/90 border border-emerald-600/50 p-3 space-y-2.5 shadow-inner">
+                                    <div class="flex items-center justify-between gap-2 border-b border-slate-800 pb-2">
+                                        <div class="flex items-center gap-2">
+                                            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-rose-500/20 text-rose-300 border border-rose-500/40 text-[10px] font-black uppercase tracking-wider animate-pulse font-mono-num">
+                                                <span class="w-1.5 h-1.5 rounded-full bg-rose-400"></span>
+                                                LIVE
+                                            </span>
+                                            <span class="text-[11px] font-bold text-slate-300 font-mono-num">
+                                                {{ getGameLiveStatus(game)?.detail || 'In Progress' }}
+                                            </span>
+                                            <span v-if="getGameLiveStatus(game)?.situation" class="text-[10px] text-amber-300 font-mono-num hidden sm:inline">
+                                                &bull; {{ getGameLiveStatus(game).situation }}
+                                            </span>
+                                        </div>
+                                        <!-- Scoreboard -->
+                                        <div class="text-sm font-black text-white font-mono-num flex items-center gap-2 bg-slate-900 px-2.5 py-1 rounded-lg border border-slate-800">
+                                            <span :class="{'text-emerald-400': getDisplayScore(game).away > getDisplayScore(game).home}">
+                                                {{ game.road }} {{ getDisplayScore(game).away }}
+                                            </span>
+                                            <span class="text-slate-500">-</span>
+                                            <span :class="{'text-emerald-400': getDisplayScore(game).home > getDisplayScore(game).away}">
+                                                {{ getDisplayScore(game).home }} {{ game.home }}
+                                            </span>
+                                        </div>
+                                    </div>
+
+                                    <!-- Live Spread Cover Probability Bar -->
+                                    <div v-if="calculateLiveSpreadProb(game)" class="space-y-1.5">
+                                        <div class="flex items-center justify-between gap-2 text-xs">
+                                            <div class="flex items-center gap-1.5">
+                                                <span class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Live Spread Cover Prob:</span>
+                                                <span class="text-sm font-black font-mono-num" :class="getWinProbTextColor(calculateLiveSpreadProb(game).pct)">
+                                                    {{ calculateLiveSpreadProb(game).label }}
+                                                </span>
+                                            </div>
+                                            <div class="font-mono-num text-[11px] font-bold px-2 py-0.5 rounded-md" 
+                                                 :class="calculateLiveSpreadProb(game).coverDiff >= 0 ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40' : 'bg-rose-500/20 text-rose-300 border border-rose-500/40'">
+                                                {{ calculateLiveSpreadProb(game).coverDiff >= 0 ? 'Covering by +' + calculateLiveSpreadProb(game).coverDiff : 'Trailing cover by ' + calculateLiveSpreadProb(game).coverDiff }} pts
+                                            </div>
+                                        </div>
+
+                                        <div class="w-full bg-slate-900 rounded-full h-2.5 border border-slate-800 overflow-hidden relative">
+                                            <div 
+                                                class="h-full rounded-full transition-all duration-700 ease-out"
+                                                :style="{ width: calculateLiveSpreadProb(game).pct + '%' }"
+                                                :class="getWinProbBarColor(calculateLiveSpreadProb(game).pct)"
+                                            ></div>
+                                            <div class="absolute left-1/2 top-0 bottom-0 w-0.5 bg-slate-700 -translate-x-1/2"></div>
+                                        </div>
+                                    </div>
+
+                                    <!-- Live Total Pace Tracker -->
+                                    <div class="flex items-center justify-between text-[11px] font-mono-num bg-slate-900/60 p-2 rounded-lg border border-slate-800">
+                                        <span class="text-slate-400">Current Total: <strong class="text-white">{{ (getDisplayScore(game).away + getDisplayScore(game).home) || 0 }} pts</strong></span>
+                                        <span class="text-cyan-300 font-bold">
+                                            Pace Projection: {{ calculateLiveTotalPace(game) }} pts (Line: {{ game.liveTotal }})
+                                        </span>
+                                    </div>
+                                </div>
+
+                                <!-- COMPLETED FINAL STATE -->
+                                <div v-else-if="getGameLiveStatus(game)?.isCompleted || getGameSettledGrades(game).hasSettled" class="flex flex-wrap items-center justify-between gap-2 px-3 py-2 rounded-lg bg-slate-950/80 border border-slate-800 font-mono-num text-xs">
+                                    <div class="flex items-center gap-2">
+                                        <span class="text-[10px] font-black uppercase tracking-wider text-slate-400">
+                                            {{ getGameLiveStatus(game)?.detail || 'FINAL' }}
+                                        </span>
+                                        <span class="font-bold text-slate-100">
+                                            {{ game.road }} {{ getDisplayScore(game).away }} - {{ getDisplayScore(game).home }} {{ game.home }}
+                                        </span>
+                                    </div>
+
+                                    <!-- Outcome Badges for Spread, ML, and Total -->
+                                    <div class="flex items-center gap-1.5 flex-wrap">
+                                        <!-- Spread Grade -->
+                                        <span class="px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wider border"
+                                              :class="getOutcomeBadgeClass(getGameSettledGrades(game).spreadGrade)">
+                                            Spread: {{ getGameSettledGrades(game).spreadGrade || '—' }}
+                                        </span>
+                                        <!-- ML Grade -->
+                                        <span class="px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wider border"
+                                              :class="getOutcomeBadgeClass(getGameSettledGrades(game).mlGrade)">
+                                            ML: {{ getGameSettledGrades(game).mlGrade || '—' }}
+                                        </span>
+                                        <!-- Total Grade -->
+                                        <span class="px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wider border"
+                                              :class="getOutcomeBadgeClass(getGameSettledGrades(game).totalGrade)">
+                                            O/U: {{ getGameSettledGrades(game).totalGrade || '—' }}
+                                        </span>
+                                    </div>
+                                </div>
+
+                                <!-- SCHEDULED / PREGAME STATE -->
+                                <div v-else class="flex items-center justify-between text-[11px] px-3 py-1.5 rounded-lg bg-slate-950/40 border border-slate-800 text-slate-400 font-mono-num">
+                                    <span class="text-slate-500">Scheduled Kickoff:</span>
+                                    <span class="text-slate-300">
+                                        {{ getGameLiveStatus(game)?.startTime || game.kickoffFormatted || 'Awaiting Kickoff' }}
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- ==================== MATCHUP DEEP-DIVE DRAWER ==================== -->
+                    <div class="border-t border-slate-800/80 bg-slate-950/60">
+                        <button 
+                            @click="game.showDeepDive = !game.showDeepDive"
+                            class="w-full px-3.5 py-2.5 flex items-center justify-between text-xs font-bold text-slate-300 hover:text-white bg-slate-900/60 hover:bg-slate-800/60 transition cursor-pointer"
+                        >
+                            <span class="flex items-center gap-2">
+                                <span class="text-emerald-400">📊</span>
+                                <span>{{ game.showDeepDive ? 'Close Matchup Deep-Dive' : 'Open Matchup Deep-Dive (EPA, Advanced Efficiency & Models)' }}</span>
+                            </span>
+                            <span class="text-slate-500 font-mono-num text-[11px]">{{ game.showDeepDive ? '▲ Less' : '▼ More' }}</span>
+                        </button>
+
+                        <div v-if="game.showDeepDive" class="p-3.5 space-y-3.5 border-t border-slate-800/80">
+                            <!-- Inner Tabs -->
+                            <div class="flex items-center gap-1.5 bg-slate-950 p-1 rounded-lg border border-slate-800 text-xs flex-wrap">
+                                <button 
+                                    @click="game.deepDiveTab = 'ratings'"
+                                    class="flex-1 py-1 px-2 rounded-md font-bold transition text-center whitespace-nowrap"
+                                    :class="(game.deepDiveTab || 'ratings') === 'ratings' ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'"
+                                >
+                                    ⚡ EPA &amp; Ratings
+                                </button>
+                                <button 
+                                    @click="game.deepDiveTab = 'spreadModels'"
+                                    class="flex-1 py-1 px-2 rounded-md font-bold transition text-center whitespace-nowrap"
+                                    :class="game.deepDiveTab === 'spreadModels' ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'"
+                                >
+                                    🏈 Spread Matrix (20)
+                                </button>
+                                <button 
+                                    @click="game.deepDiveTab = 'mlModels'"
+                                    class="flex-1 py-1 px-2 rounded-md font-bold transition text-center whitespace-nowrap"
+                                    :class="game.deepDiveTab === 'mlModels' ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'"
+                                >
+                                    💰 ML Matrix (64)
+                                </button>
+                                <button 
+                                    @click="game.deepDiveTab = 'totalModels'"
+                                    class="flex-1 py-1 px-2 rounded-md font-bold transition text-center whitespace-nowrap"
+                                    :class="game.deepDiveTab === 'totalModels' ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'"
+                                >
+                                    📊 Total Matrix (15)
+                                </button>
+                            </div>
+
+                            <!-- SUB-TAB 1: EPA & RATINGS -->
+                            <div v-if="(game.deepDiveTab || 'ratings') === 'ratings'" class="space-y-3">
+                                <div class="bg-slate-900 rounded-xl p-3 border border-slate-800 space-y-2.5">
+                                    <div class="flex items-center justify-between text-[10px] font-bold uppercase tracking-wider text-slate-400 border-b border-slate-800/80 pb-1.5">
+                                        <span>Advanced NFL EPA &amp; Efficiency</span>
+                                        <span class="font-mono-num text-slate-400">per play metrics</span>
+                                    </div>
+
+                                    <div class="grid grid-cols-3 gap-1.5 text-center text-xs font-mono-num">
+                                        <div class="text-slate-400 text-left font-sans text-[11px] self-center">Metric</div>
+                                        <div class="font-extrabold text-slate-200 truncate">{{ game.road }}</div>
+                                        <div class="font-extrabold text-emerald-400 truncate">{{ game.home }}</div>
+
+                                        <!-- Off EPA -->
+                                        <div class="text-slate-400 text-left font-sans text-[11px]">Off EPA / Play</div>
+                                        <div class="py-1 px-1.5 rounded bg-slate-950 font-bold"
+                                             :class="getTeamRatings(game.road).offEpa >= 0 ? 'text-emerald-400' : 'text-rose-400'">
+                                            {{ getTeamRatings(game.road).offEpa > 0 ? '+' : '' }}{{ getTeamRatings(game.road).offEpa }}
+                                        </div>
+                                        <div class="py-1 px-1.5 rounded bg-slate-950 font-bold"
+                                             :class="getTeamRatings(game.home).offEpa >= 0 ? 'text-emerald-400' : 'text-rose-400'">
+                                            {{ getTeamRatings(game.home).offEpa > 0 ? '+' : '' }}{{ getTeamRatings(game.home).offEpa }}
+                                        </div>
+
+                                        <!-- Def EPA (lower / negative is better) -->
+                                        <div class="text-slate-400 text-left font-sans text-[11px]">Def EPA / Play</div>
+                                        <div class="py-1 px-1.5 rounded bg-slate-950 font-bold"
+                                             :class="getTeamRatings(game.road).defEpa <= 0 ? 'text-emerald-400' : 'text-rose-400'">
+                                            {{ getTeamRatings(game.road).defEpa > 0 ? '+' : '' }}{{ getTeamRatings(game.road).defEpa }}
+                                        </div>
+                                        <div class="py-1 px-1.5 rounded bg-slate-950 font-bold"
+                                             :class="getTeamRatings(game.home).defEpa <= 0 ? 'text-emerald-400' : 'text-rose-400'">
+                                            {{ getTeamRatings(game.home).defEpa > 0 ? '+' : '' }}{{ getTeamRatings(game.home).defEpa }}
+                                        </div>
+
+                                        <!-- Net EPA -->
+                                        <div class="text-slate-400 text-left font-sans text-[11px]">Net EPA / Play</div>
+                                        <div class="py-1 px-1.5 rounded bg-slate-950 font-extrabold"
+                                             :class="getTeamRatings(game.road).netEpa >= 0 ? 'text-emerald-300' : 'text-rose-400'">
+                                            {{ getTeamRatings(game.road).netEpa > 0 ? '+' : '' }}{{ getTeamRatings(game.road).netEpa }}
+                                        </div>
+                                        <div class="py-1 px-1.5 rounded bg-slate-950 font-extrabold"
+                                             :class="getTeamRatings(game.home).netEpa >= 0 ? 'text-emerald-300' : 'text-rose-400'">
+                                            {{ getTeamRatings(game.home).netEpa > 0 ? '+' : '' }}{{ getTeamRatings(game.home).netEpa }}
+                                        </div>
+
+                                        <!-- Pass / Rush EPA -->
+                                        <div class="text-slate-400 text-left font-sans text-[11px]">Pass / Rush EPA</div>
+                                        <div class="py-1 px-1.5 rounded bg-slate-950 text-[10px] text-slate-300">
+                                            {{ getTeamRatings(game.road).passEpa }} / {{ getTeamRatings(game.road).rushEpa }}
+                                        </div>
+                                        <div class="py-1 px-1.5 rounded bg-slate-950 text-[10px] text-slate-300">
+                                            {{ getTeamRatings(game.home).passEpa }} / {{ getTeamRatings(game.home).rushEpa }}
+                                        </div>
+
+                                        <!-- PPG / Opp PPG -->
+                                        <div class="text-slate-400 text-left font-sans text-[11px]">PPG / Opp PPG</div>
+                                        <div class="py-1 px-1.5 rounded bg-slate-950 text-[10px] text-slate-300">
+                                            {{ getTeamRatings(game.road).ppg }} / {{ getTeamRatings(game.road).oppPpg }}
+                                        </div>
+                                        <div class="py-1 px-1.5 rounded bg-slate-950 text-[10px] text-slate-300">
+                                            {{ getTeamRatings(game.home).ppg }} / {{ getTeamRatings(game.home).oppPpg }}
+                                        </div>
+
+                                        <!-- Turnover Margin -->
+                                        <div class="text-slate-400 text-left font-sans text-[11px]">Turnover Margin</div>
+                                        <div class="py-1 px-1.5 rounded bg-slate-950 font-bold"
+                                             :class="getTeamRatings(game.road).turnoverMargin >= 0 ? 'text-emerald-400' : 'text-rose-400'">
+                                            {{ getTeamRatings(game.road).turnoverMargin > 0 ? '+' : '' }}{{ getTeamRatings(game.road).turnoverMargin }}
+                                        </div>
+                                        <div class="py-1 px-1.5 rounded bg-slate-950 font-bold"
+                                             :class="getTeamRatings(game.home).turnoverMargin >= 0 ? 'text-emerald-400' : 'text-rose-400'">
+                                            {{ getTeamRatings(game.home).turnoverMargin > 0 ? '+' : '' }}{{ getTeamRatings(game.home).turnoverMargin }}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- SUB-TAB 2: SPREAD MODELS MATRIX -->
+                            <div v-if="game.deepDiveTab === 'spreadModels'" class="space-y-3 text-[11px]">
+                                <!-- Tier 1 Core Models -->
+                                <div>
+                                    <div class="flex items-center justify-between text-[10px] font-bold uppercase tracking-wider text-emerald-400 mb-1">
+                                        <span>Tier 1 Core Spread Models (5 models)</span>
+                                        <span class="font-mono-num text-slate-400 text-[9px]">eff &bull; cong &bull; clean &bull; ffw &bull; l2</span>
+                                    </div>
+                                    <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-1.5 font-mono-num">
+                                        <div v-for="mKey in spreadModelTiers.t1" :key="mKey" 
+                                             class="p-1.5 rounded bg-slate-900 border text-center"
+                                             :class="getModelCellClass(getModelVal(game.rawSpread, mKey), game.liveLine)">
+                                            <div class="text-[9px] text-slate-400 uppercase font-sans font-bold">{{ formatModelLabel(mKey) }}</div>
+                                            <div class="font-bold text-xs mt-0.5">{{ formatMetric(getModelVal(game.rawSpread, mKey)) }}</div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Tier 2 Secondary Models -->
+                                <div>
+                                    <div class="flex items-center justify-between text-[10px] font-bold uppercase tracking-wider text-sky-400 mb-1">
+                                        <span>Tier 2 Secondary Models (7 models)</span>
+                                        <span class="font-mono-num text-slate-400 text-[9px]">coff &bull; log &bull; pi &bull; donchess &bull; pyth &bull; l1 &bull; med</span>
+                                    </div>
+                                    <div class="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-7 gap-1.5 font-mono-num">
+                                        <div v-for="mKey in spreadModelTiers.t2" :key="mKey" 
+                                             class="p-1.5 rounded bg-slate-900 border text-center"
+                                             :class="getModelCellClass(getModelVal(game.rawSpread, mKey), game.liveLine)">
+                                            <div class="text-[9px] text-slate-400 uppercase font-sans font-bold">{{ formatModelLabel(mKey) }}</div>
+                                            <div class="font-bold text-xs mt-0.5">{{ formatMetric(getModelVal(game.rawSpread, mKey)) }}</div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Tier 3 Check Models -->
+                                <div>
+                                    <div class="flex items-center justify-between text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">
+                                        <span>Tier 3 Check Models (8 models)</span>
+                                        <span class="font-mono-num text-slate-400 text-[9px]">dok &bull; curry &bull; avg &bull; mass &bull; ppg &bull; espn &bull; saggm &bull; sag</span>
+                                    </div>
+                                    <div class="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-8 gap-1.5 font-mono-num">
+                                        <div v-for="mKey in spreadModelTiers.t3" :key="mKey" 
+                                             class="p-1.5 rounded bg-slate-900 border text-center"
+                                             :class="getModelCellClass(getModelVal(game.rawSpread, mKey), game.liveLine)">
+                                            <div class="text-[9px] text-slate-400 uppercase font-sans font-bold">{{ formatModelLabel(mKey) }}</div>
+                                            <div class="font-bold text-xs mt-0.5">{{ formatMetric(getModelVal(game.rawSpread, mKey)) }}</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- SUB-TAB 2.5: MONEYLINE (ML) MODELS MATRIX (64 MODELS) -->
+                            <div v-if="game.deepDiveTab === 'mlModels'" class="space-y-3.5 text-[11px]">
+                                <!-- ML Tier 1 Core Models (21 models) -->
+                                <div>
+                                    <div class="flex items-center justify-between text-[10px] font-bold uppercase tracking-wider text-amber-400 mb-1.5">
+                                        <span>Moneyline Tier 1 Core Models (21 models)</span>
+                                        <span class="font-mono-num text-slate-400 text-[9px]">
+                                            {{ game.mlResult?.t1?.agreeCount }}/{{ game.mlResult?.t1?.total }} pick {{ game.mlResult?.t1?.dir }}
+                                        </span>
+                                    </div>
+                                    <div class="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-7 gap-1.5 font-mono-num">
+                                        <div v-for="mKey in mlModelTiers.t1" :key="mKey" 
+                                             class="p-1.5 rounded bg-slate-900 border text-center"
+                                             :class="getMlModelCellClass(getModelVal(game.rawSpread, mKey))">
+                                            <div class="text-[9px] text-slate-400 uppercase font-sans font-bold">{{ formatModelLabel(mKey) }}</div>
+                                            <div class="font-bold text-xs mt-0.5">{{ formatMetric(getModelVal(game.rawSpread, mKey)) }}</div>
+                                            <div class="text-[9px] font-bold mt-0.5" :class="parseNum(getModelVal(game.rawSpread, mKey)) > 0 ? 'text-emerald-400' : (parseNum(getModelVal(game.rawSpread, mKey)) < 0 ? 'text-sky-400' : 'text-slate-400')">
+                                                {{ getModelWinnerLabel(getModelVal(game.rawSpread, mKey), game.home, game.road) }}
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- ML Tier 2 Secondary Models (21 models) -->
+                                <div>
+                                    <div class="flex items-center justify-between text-[10px] font-bold uppercase tracking-wider text-sky-400 mb-1.5">
+                                        <span>Moneyline Tier 2 Secondary Models (21 models)</span>
+                                        <span class="font-mono-num text-slate-400 text-[9px]">
+                                            {{ game.mlResult?.t2?.agreeCount }}/{{ game.mlResult?.t2?.total }} pick {{ game.mlResult?.t2?.dir }}
+                                        </span>
+                                    </div>
+                                    <div class="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-7 gap-1.5 font-mono-num">
+                                        <div v-for="mKey in mlModelTiers.t2" :key="mKey" 
+                                             class="p-1.5 rounded bg-slate-900 border text-center"
+                                             :class="getMlModelCellClass(getModelVal(game.rawSpread, mKey))">
+                                            <div class="text-[9px] text-slate-400 uppercase font-sans font-bold">{{ formatModelLabel(mKey) }}</div>
+                                            <div class="font-bold text-xs mt-0.5">{{ formatMetric(getModelVal(game.rawSpread, mKey)) }}</div>
+                                            <div class="text-[9px] font-bold mt-0.5" :class="parseNum(getModelVal(game.rawSpread, mKey)) > 0 ? 'text-emerald-400' : (parseNum(getModelVal(game.rawSpread, mKey)) < 0 ? 'text-sky-400' : 'text-slate-400')">
+                                                {{ getModelWinnerLabel(getModelVal(game.rawSpread, mKey), game.home, game.road) }}
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- ML Tier 3 Check Models (22 models) -->
+                                <div>
+                                    <div class="flex items-center justify-between text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">
+                                        <span>Moneyline Tier 3 Check Models (22 models)</span>
+                                        <span class="font-mono-num text-slate-400 text-[9px]">
+                                            {{ game.mlResult?.t3?.agreeCount }}/{{ game.mlResult?.t3?.total }} pick {{ game.mlResult?.t3?.dir }}
+                                        </span>
+                                    </div>
+                                    <div class="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-7 gap-1.5 font-mono-num">
+                                        <div v-for="mKey in mlModelTiers.t3" :key="mKey" 
+                                             class="p-1.5 rounded bg-slate-900 border text-center"
+                                             :class="getMlModelCellClass(getModelVal(game.rawSpread, mKey))">
+                                            <div class="text-[9px] text-slate-400 uppercase font-sans font-bold">{{ formatModelLabel(mKey) }}</div>
+                                            <div class="font-bold text-xs mt-0.5">{{ formatMetric(getModelVal(game.rawSpread, mKey)) }}</div>
+                                            <div class="text-[9px] font-bold mt-0.5" :class="parseNum(getModelVal(game.rawSpread, mKey)) > 0 ? 'text-emerald-400' : (parseNum(getModelVal(game.rawSpread, mKey)) < 0 ? 'text-sky-400' : 'text-slate-400')">
+                                                {{ getModelWinnerLabel(getModelVal(game.rawSpread, mKey), game.home, game.road) }}
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- SUB-TAB 3: TOTAL (O/U) MODELS (15 MODELS IN 3 TIERS) -->
+                            <div v-if="game.deepDiveTab === 'totalModels'" class="space-y-3.5 text-[11px]">
+                                <!-- Total Tier 1 Core Models (4 models) -->
+                                <div>
+                                    <div class="flex items-center justify-between text-[10px] font-bold uppercase tracking-wider text-cyan-400 mb-1.5">
+                                        <span>Total Tier 1 Core Models (4 models)</span>
+                                        <span class="font-mono-num text-slate-400 text-[9px]">
+                                            {{ game.totalResult?.t1?.agreeCount }}/{{ game.totalResult?.t1?.total }} pick {{ game.totalResult?.t1?.dir }}
+                                        </span>
+                                    </div>
+                                    <div class="grid grid-cols-2 sm:grid-cols-4 gap-1.5 font-mono-num">
+                                        <div v-for="mKey in totalModelTiers.t1" :key="mKey" 
+                                             class="p-2 rounded bg-slate-900 border text-center transition"
+                                             :class="getTotalModelCellClass(getModelVal(game.rawTotal, mKey), game.liveTotal)">
+                                            <div class="text-[9px] text-slate-400 uppercase font-sans font-bold truncate">{{ formatTotalModelLabel(mKey) }}</div>
+                                            <div class="font-bold text-sm mt-0.5">{{ formatTotalNum(getModelVal(game.rawTotal, mKey)) }}</div>
+                                            <div class="text-[9px] font-bold mt-0.5">
+                                                {{ getTotalModelDiffLabel(getModelVal(game.rawTotal, mKey), game.liveTotal) }}
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Total Tier 2 Secondary Models (6 models) -->
+                                <div>
+                                    <div class="flex items-center justify-between text-[10px] font-bold uppercase tracking-wider text-sky-400 mb-1.5">
+                                        <span>Total Tier 2 Secondary Models (6 models)</span>
+                                        <span class="font-mono-num text-slate-400 text-[9px]">
+                                            {{ game.totalResult?.t2?.agreeCount }}/{{ game.totalResult?.t2?.total }} pick {{ game.totalResult?.t2?.dir }}
+                                        </span>
+                                    </div>
+                                    <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-1.5 font-mono-num">
+                                        <div v-for="mKey in totalModelTiers.t2" :key="mKey" 
+                                             class="p-2 rounded bg-slate-900 border text-center transition"
+                                             :class="getTotalModelCellClass(getModelVal(game.rawTotal, mKey), game.liveTotal)">
+                                            <div class="text-[9px] text-slate-400 uppercase font-sans font-bold truncate">{{ formatTotalModelLabel(mKey) }}</div>
+                                            <div class="font-bold text-sm mt-0.5">{{ formatTotalNum(getModelVal(game.rawTotal, mKey)) }}</div>
+                                            <div class="text-[9px] font-bold mt-0.5">
+                                                {{ getTotalModelDiffLabel(getModelVal(game.rawTotal, mKey), game.liveTotal) }}
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Total Tier 3 Check Models (5 models) -->
+                                <div>
+                                    <div class="flex items-center justify-between text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">
+                                        <span>Total Tier 3 Check Models (5 models)</span>
+                                        <span class="font-mono-num text-slate-400 text-[9px]">
+                                            {{ game.totalResult?.t3?.agreeCount }}/{{ game.totalResult?.t3?.total }} pick {{ game.totalResult?.t3?.dir }}
+                                        </span>
+                                    </div>
+                                    <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-1.5 font-mono-num">
+                                        <div v-for="mKey in totalModelTiers.t3" :key="mKey" 
+                                             class="p-2 rounded bg-slate-900 border text-center transition"
+                                             :class="getTotalModelCellClass(getModelVal(game.rawTotal, mKey), game.liveTotal)">
+                                            <div class="text-[9px] text-slate-400 uppercase font-sans font-bold truncate">{{ formatTotalModelLabel(mKey) }}</div>
+                                            <div class="font-bold text-sm mt-0.5">{{ formatTotalNum(getModelVal(game.rawTotal, mKey)) }}</div>
+                                            <div class="text-[9px] font-bold mt-0.5">
+                                                {{ getTotalModelDiffLabel(getModelVal(game.rawTotal, mKey), game.liveTotal) }}
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ==================== SUMMARY TAB ==================== -->
+        <div v-if="activeTab === 'summary'" class="space-y-4">
+            
+            <!-- Summary KPI Metrics -->
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                <div class="bg-slate-900 border border-slate-800 rounded-xl p-3">
+                    <span class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Total Games</span>
+                    <div class="text-xl font-extrabold text-white font-mono-num mt-0.5">{{ analyzedGames.length }}</div>
+                </div>
+                <div class="bg-emerald-950/40 border border-emerald-800/60 rounded-xl p-3">
+                    <span class="text-[10px] font-bold uppercase tracking-wider text-emerald-400">Strong Spread (≥2.5)</span>
+                    <div class="text-xl font-extrabold text-emerald-300 font-mono-num mt-0.5">{{ strongSpreadCount }}</div>
+                </div>
+                <div class="bg-amber-950/40 border border-amber-800/60 rounded-xl p-3">
+                    <span class="text-[10px] font-bold uppercase tracking-wider text-amber-400">Strong ML (|Margin| ≥ 6.0)</span>
+                    <div class="text-xl font-extrabold text-amber-300 font-mono-num mt-0.5">{{ strongMlCount }}</div>
+                </div>
+                <div class="bg-cyan-950/40 border border-cyan-800/60 rounded-xl p-3">
+                    <span class="text-[10px] font-bold uppercase tracking-wider text-cyan-400">Strong Totals (2.5 - 4.5)</span>
+                    <div class="text-xl font-extrabold text-cyan-300 font-mono-num mt-0.5">{{ strongTotalCount }}</div>
+                </div>
+            </div>
+
+            <!-- Summary Controls -->
+            <div class="bg-slate-900 border border-slate-800 rounded-xl p-3 flex flex-wrap items-center justify-between gap-2">
+                <div class="text-xs font-semibold text-slate-300">
+                    <span v-if="searchQuery" class="text-emerald-400 font-bold">Filtered by "{{ searchQuery }}" &bull; </span>
+                    Consolidated Recommendations Matrix across Spread, ML, and Total
+                </div>
+
+                <button 
+                    @click="copySummaryToClipboard"
+                    class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-black bg-emerald-600 hover:bg-emerald-500 text-white transition cursor-pointer"
+                >
+                    <span>📋 {{ copyButtonText }}</span>
+                </button>
+            </div>
+
+            <!-- Summary Table -->
+            <div class="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-lg">
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left border-collapse">
+                        <thead>
+                            <tr class="bg-slate-950/90 border-b border-slate-800 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                                <th class="py-3 px-3">Matchup</th>
+                                <th class="py-3 px-2 text-center">Market Lines</th>
+                                <th class="py-3 px-3">Spread Pick</th>
+                                <th class="py-3 px-3">Moneyline Pick</th>
+                                <th class="py-3 px-3">Total (O/U) Pick</th>
+                                <th class="py-3 px-2 text-center">Status / Score</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-slate-800/70 text-xs">
+                            <tr v-for="game in summaryList" :key="'sum-' + game.id" class="hover:bg-slate-800/40 transition">
+                                <td class="py-3 px-3">
+                                    <div class="font-bold text-slate-100 flex items-center gap-1.5 flex-wrap">
+                                        <span>{{ game.road }}</span>
+                                        <span class="text-[10px] text-slate-500">{{ game.neutral == 1 ? 'vs' : '@' }}</span>
+                                        <span class="text-emerald-400">{{ game.home }}</span>
+                                    </div>
+                                    <div class="text-[10px] text-slate-400 font-mono-num mt-0.5">
+                                        <span v-if="game.kickoffFormatted" class="text-sky-300 font-semibold">🕒 {{ game.kickoffFormatted }}</span>
+                                    </div>
+                                </td>
+
+                                <td class="py-3 px-2 text-center font-mono-num text-[11px] text-slate-300">
+                                    <div>{{ formatFavoredLabel(game) }}</div>
+                                    <div class="text-[10px] text-amber-300">O/U {{ game.liveTotal }}</div>
+                                </td>
+
+                                <td class="py-3 px-3">
+                                    <div class="font-extrabold text-slate-100 font-mono-num">
+                                        {{ game.spreadResult?.targetTeam }} {{ formatBetSpread(game.liveLine, game.spreadResult?.finalDir) }}
+                                    </div>
+                                    <div class="text-[10px] font-bold mt-0.5" :class="game.spreadResult?.finalAction === 'STRONG BET' ? 'text-emerald-400' : 'text-sky-400'">
+                                        {{ game.spreadResult?.finalAction }} (Δ {{ formatDeltaNum(game.spreadResult?.delta) }})
+                                    </div>
+                                </td>
+
+                                <td class="py-3 px-3">
+                                    <div class="font-extrabold text-amber-300 font-mono-num">
+                                        {{ game.mlResult?.targetTeam }} ({{ game.mlResult?.targetMlFormatted }})
+                                    </div>
+                                    <div class="text-[10px] font-bold mt-0.5" :class="game.mlResult?.finalAction === 'STRONG BET' ? 'text-amber-400' : 'text-slate-400'">
+                                        {{ game.mlResult?.finalAction }} (Margin {{ formatDeltaNum(game.mlResult?.margin) }} pts)
+                                        <span v-if="game.mlResult?.isT1T2Split" class="text-amber-400 font-semibold">&bull; T1/T2 Split</span>
+                                    </div>
+                                </td>
+
+                                <td class="py-3 px-3">
+                                    <div class="font-extrabold text-cyan-300 font-mono-num">
+                                        {{ game.totalResult?.pickText }}
+                                    </div>
+                                    <div class="text-[10px] font-bold mt-0.5" :class="game.totalResult?.finalAction?.includes('STRONG') ? 'text-cyan-400' : 'text-slate-400'">
+                                        {{ game.totalResult?.finalAction }} (Proj: {{ game.totalResult?.modelTotal?.toFixed(1) }})
+                                    </div>
+                                </td>
+
+                                <td class="py-3 px-2 text-center font-mono-num">
+                                    <div v-if="isGameLive(game)" class="text-[11px] font-bold text-rose-400 animate-pulse">
+                                        LIVE: {{ getDisplayScore(game).away }}-{{ getDisplayScore(game).home }}
+                                    </div>
+                                    <div v-else-if="getGameLiveStatus(game)?.isCompleted" class="text-[11px] font-bold text-slate-200">
+                                        FINAL ({{ getDisplayScore(game).away }}-{{ getDisplayScore(game).home }})
+                                    </div>
+                                    <div v-else class="text-[10px] text-slate-500">
+                                        Scheduled
+                                    </div>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- ==================== RECORD / LEDGER TAB ==================== -->
+        <div v-if="activeTab === 'record'" class="space-y-4">
+            
+            <!-- Automated Season Cloud Persistence Header -->
+            <div class="bg-gradient-to-r from-emerald-950/30 via-slate-900 to-slate-900 border border-emerald-500/30 rounded-xl p-3.5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-md">
+                <div class="flex items-center gap-3">
+                    <div class="w-8 h-8 rounded-lg bg-emerald-500/20 text-emerald-300 flex items-center justify-center font-bold text-base shrink-0 border border-emerald-500/30">
+                        ☁️
+                    </div>
+                    <div>
+                        <div class="text-xs font-bold text-white flex items-center gap-1.5">
+                            <span>Historical Season Record &amp; Ledger</span>
+                            <span class="text-[9px] uppercase px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-mono-num font-bold">
+                                100% Auto-Synced in Cloud
+                            </span>
+                        </div>
+                        <p class="text-[11px] text-slate-400">
+                            All completed games are automatically graded across Spread, ML, and Total, then permanently preserved in Google Cloud Firestore.
+                        </p>
+                    </div>
+                </div>
+
+                <div class="flex items-center gap-2 self-stretch sm:self-auto shrink-0">
+                    <button 
+                        @click="autoSyncHistoricalSeasonFromSheets"
+                        :disabled="isHistoricalSyncing"
+                        class="px-3.5 py-1.5 rounded-lg text-xs font-bold bg-emerald-700 hover:bg-emerald-600 text-white transition shadow-sm flex items-center gap-1.5"
+                    >
+                        <span :class="{'animate-spin': isHistoricalSyncing}">🔄</span>
+                        <span>{{ isHistoricalSyncing ? 'Syncing Sheets...' : 'Sync Historical Sheets' }}</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Controls Bar -->
+            <div class="bg-slate-900 border border-slate-800 rounded-xl p-3 flex flex-wrap items-center justify-between gap-2.5 shadow-sm">
+                <!-- Market Type Selector -->
+                <div class="flex items-center gap-1.5 flex-wrap">
+                    <span class="text-xs font-bold text-slate-400 uppercase">Market:</span>
+                    <button 
+                        v-for="m in ['all', 'spread', 'ml', 'total']" 
+                        :key="m"
+                        @click="recordMarketFilter = m"
+                        class="px-2.5 py-1 rounded-lg text-xs font-bold transition cursor-pointer"
+                        :class="recordMarketFilter === m ? 'bg-emerald-600 text-white shadow-md' : 'bg-slate-950 text-slate-400 border border-slate-800'"
+                    >
+                        {{ m.toUpperCase() }}
+                    </button>
+                </div>
+
+                <!-- Signal Filter -->
+                <div class="flex items-center gap-1.5 flex-wrap">
+                    <span class="text-xs font-bold text-slate-400 uppercase">Tier:</span>
+                    <button 
+                        v-for="sig in [
+                            { id: 'all', label: 'All' },
+                            { id: 'strong', label: 'Strong Bets' },
+                            { id: 'lean', label: 'Leans' }
+                        ]" 
+                        :key="sig.id"
+                        @click="recordSignalFilter = sig.id"
+                        class="px-2 py-1 rounded-lg text-xs font-bold transition cursor-pointer"
+                        :class="recordSignalFilter === sig.id ? 'bg-slate-800 text-amber-300 border border-amber-500/40' : 'bg-slate-950 text-slate-400 border border-slate-800'"
+                    >
+                        {{ sig.label }}
+                    </button>
+                </div>
+
+                <!-- Week Selector -->
+                <div class="flex items-center gap-1.5">
+                    <span class="text-xs font-bold text-slate-400 uppercase">Week:</span>
+                    <select 
+                        v-model="selectedWeek"
+                        class="bg-slate-950 text-slate-200 text-xs font-bold border border-slate-800 rounded-lg px-2.5 py-1 focus:outline-none focus:border-emerald-500"
+                    >
+                        <option value="all">All Weeks</option>
+                        <option v-for="w in availableWeeks" :key="w" :value="w">Week {{ w }}</option>
+                    </select>
+                </div>
+
+                <!-- Timeframe Selector -->
+                <div class="flex items-center gap-1.5 flex-wrap">
+                    <span class="text-xs font-bold text-slate-400 uppercase">Window:</span>
+                    <button 
+                        v-for="tf in timeframeOptions" 
+                        :key="tf.id"
+                        @click="activeTimeframe = tf.id"
+                        class="px-2 py-1 rounded-lg text-xs font-bold transition cursor-pointer"
+                        :class="activeTimeframe === tf.id ? 'bg-slate-800 text-emerald-400 border border-emerald-500/40' : 'bg-slate-950 text-slate-400 border border-slate-800'"
+                    >
+                        {{ tf.label }}
+                    </button>
+                </div>
+            </div>
+
+            <!-- Performance KPI Hero Cards -->
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div class="bg-slate-900 border border-emerald-900/60 rounded-xl p-4 shadow-sm bg-gradient-to-b from-emerald-950/20 to-slate-900">
+                    <div class="flex items-center justify-between">
+                        <span class="text-[10px] font-bold uppercase tracking-wider text-emerald-400">Spread Picks Record</span>
+                        <span class="text-[9px] font-mono-num text-slate-400">{{ selectedWeek === 'all' ? 'All Weeks' : 'Week ' + selectedWeek }}</span>
+                    </div>
+                    <div class="text-2xl font-black text-white font-mono-num mt-1">
+                        {{ spreadRecord.w }}-{{ spreadRecord.l }}-{{ spreadRecord.p }}
+                    </div>
+                    <div class="text-[11px] font-mono-num mt-1 flex justify-between text-emerald-300">
+                        <span>Win Rate: <strong>{{ spreadRecord.winPct }}%</strong></span>
+                        <span>{{ spreadRecord.total }} Plays</span>
+                    </div>
+                </div>
+
+                <div class="bg-slate-900 border border-amber-900/60 rounded-xl p-4 shadow-sm bg-gradient-to-b from-amber-950/20 to-slate-900">
+                    <div class="flex items-center justify-between">
+                        <span class="text-[10px] font-bold uppercase tracking-wider text-amber-400">Moneyline (ML) Record</span>
+                        <span class="text-[9px] font-mono-num text-slate-400">{{ selectedWeek === 'all' ? 'All Weeks' : 'Week ' + selectedWeek }}</span>
+                    </div>
+                    <div class="text-2xl font-black text-white font-mono-num mt-1">
+                        {{ mlRecord.w }}-{{ mlRecord.l }}-{{ mlRecord.p }}
+                    </div>
+                    <div class="text-[11px] font-mono-num mt-1 flex justify-between text-amber-300">
+                        <span>Win Rate: <strong>{{ mlRecord.winPct }}%</strong></span>
+                        <span>{{ mlRecord.total }} Plays</span>
+                    </div>
+                </div>
+
+                <div class="bg-slate-900 border border-cyan-900/60 rounded-xl p-4 shadow-sm bg-gradient-to-b from-cyan-950/20 to-slate-900">
+                    <div class="flex items-center justify-between">
+                        <span class="text-[10px] font-bold uppercase tracking-wider text-cyan-400">Total (O/U) Record</span>
+                        <span class="text-[9px] font-mono-num text-slate-400">{{ selectedWeek === 'all' ? 'All Weeks' : 'Week ' + selectedWeek }}</span>
+                    </div>
+                    <div class="text-2xl font-black text-white font-mono-num mt-1">
+                        {{ totalRecord.w }}-{{ totalRecord.l }}-{{ totalRecord.p }}
+                    </div>
+                    <div class="text-[11px] font-mono-num mt-1 flex justify-between text-cyan-300">
+                        <span>Win Rate: <strong>{{ totalRecord.winPct }}%</strong></span>
+                        <span>{{ totalRecord.total }} Plays</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Graded Ledger Table -->
+            <div v-if="filteredGradedPlays.length === 0" class="bg-slate-900/60 border border-slate-800 rounded-xl p-8 text-center space-y-3">
+                <div class="text-3xl">🏈</div>
+                <div class="text-sm font-semibold text-slate-300">No settled plays found for the selected filter and window.</div>
+                <p class="text-xs text-slate-500 max-w-sm mx-auto">
+                    Plays are automatically loaded from Google Sheets tabs and live ESPN scores, then graded and stored permanently in Firestore.
+                </p>
+            </div>
+
+            <div v-else class="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-lg">
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left border-collapse">
+                        <thead>
+                            <tr class="bg-slate-950/90 border-b border-slate-800 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                                <th class="py-3 px-3">Date / Wk</th>
+                                <th class="py-3 px-2 text-center">Market</th>
+                                <th class="py-3 px-3">Matchup</th>
+                                <th class="py-3 px-3">Target Recommendation</th>
+                                <th class="py-3 px-2 text-center">Final Score</th>
+                                <th class="py-3 px-2 text-center">Outcome</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-slate-800/70 text-xs">
+                            <tr v-for="item in filteredGradedPlays" :key="item.key" class="hover:bg-slate-800/40 transition">
+                                <td class="py-3 px-3 text-[11px] font-mono-num text-slate-400">
+                                    <div>{{ item.date }}</div>
+                                    <div v-if="item.week" class="text-[9px] text-amber-400 font-bold">Wk {{ item.week }}</div>
+                                </td>
+
+                                <td class="py-3 px-2 text-center">
+                                    <span class="px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wider"
+                                          :class="{
+                                              'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30': item.market === 'SPREAD',
+                                              'bg-amber-500/20 text-amber-300 border border-amber-500/30': item.market === 'ML',
+                                              'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30': item.market === 'TOTAL'
+                                          }">
+                                        {{ item.market }}
+                                    </span>
+                                </td>
+
+                                <td class="py-3 px-3">
+                                    <div class="font-bold text-slate-100 flex items-center gap-1.5 flex-wrap">
+                                        <span>{{ item.road }}</span>
+                                        <span class="text-slate-500">@</span>
+                                        <span class="text-emerald-400">{{ item.home }}</span>
+                                    </div>
+                                    <div v-if="item.signal" class="text-[10px] font-bold mt-0.5"
+                                         :class="item.signal.includes('STRONG') ? 'text-emerald-400' : 'text-slate-400'">
+                                        {{ item.signal }}
+                                    </div>
+                                </td>
+
+                                <td class="py-3 px-3 font-mono-num font-bold text-white">
+                                    {{ item.pick }}
+                                </td>
+
+                                <td class="py-3 px-2 text-center font-mono-num font-bold text-slate-200">
+                                    {{ item.awayScore }} - {{ item.homeScore }}
+                                </td>
+
+                                <td class="py-3 px-2 text-center font-mono-num">
+                                    <span class="inline-block px-2.5 py-0.5 rounded text-xs font-black uppercase"
+                                          :class="getOutcomeBadgeClass(item.grade)">
+                                        {{ item.grade === 'W' ? 'WIN' : (item.grade === 'L' ? 'LOSS' : 'PUSH') }}
+                                    </span>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+        </div>
+
+    </main>
+
+    <!-- Footer Documentation -->
+    <footer class="p-4 border-t border-slate-800/80 bg-slate-950/60 text-[11px] text-slate-400 space-y-2">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+            <span class="font-bold text-slate-300">NFL Consensus Handicapping Architecture:</span>
+            <span class="text-slate-400 font-mono-num">Auto-Synced: Spread Sheet &bull; Total Sheet &bull; Live ESPN Lines</span>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-2 text-[10px] font-mono-num">
+            <div class="bg-slate-900/80 p-2.5 rounded border border-slate-800">
+                <strong class="text-emerald-400 block mb-0.5">🏈 Spread Consensus:</strong>
+                Consensus tier models evaluate pricing discrepancy against live line. Δ &ge; 2.5 pts: Strong Bet; 0.0 - 2.0 pts: Lean. (Tier 3 contrarian opposition downgrades Strong Bet to Lean).
+            </div>
+            <div class="bg-slate-900/80 p-2.5 rounded border border-slate-800">
+                <strong class="text-amber-400 block mb-0.5">💰 Moneyline (ML) Consensus:</strong>
+                Strong Bet: Tier 1 Consensus projecting |Margin| &ge; 6.0 pts. Leans: 0.0 &le; |Margin| &le; 6.0 pts or where Tier 1 and Tier 2 split on the outright winner.
+            </div>
+            <div class="bg-slate-900/80 p-2.5 rounded border border-slate-800">
+                <strong class="text-cyan-400 block mb-0.5">📊 Total (Over/Under) Consensus:</strong>
+                Strong Bet: &ge; 2.5 to 4.5 pts. Leans: &le; 2.0 pts (and edges outside 2.5-4.5 pts, or T3 contrarian downgrade).
+            </div>
+        </div>
+    </footer>
+</div>
+
+<script>
+const { createApp, ref, computed, onMounted, onUnmounted } = Vue;
+
+createApp({
+    setup() {
+        // User's provided Google Sheet IDs
+        const spreadSheetId = '1ElxfamOBG5IBhK1YdsuHoeV17ayQCJ1JZdn50c_9WbI';
+        const totalSheetId  = '1-cFvXE-svW8NbNtCGvy1HtlyI75qCLkw5RvojqCzU9Q';
+
+        const games = ref([]);
+        const loading = ref(false);
+        const autoRefresh = ref(true);
+        let autoRefreshTimer = null;
+        const lastSyncTime = ref('');
+        const liveGameStatusMap = ref({});
+        const activeTab = ref('matchups');
+        const searchQuery = ref('');
+        const quickFilter = ref('all');
+        const activeViewMode = ref('all');
+        const activeTimeframe = ref('season');
+        const recordMarketFilter = ref('all');
+        const recordSignalFilter = ref('all');
+        const selectedWeek = ref('all');
+        const isHistoricalSyncing = ref(false);
+        const toastMessage = ref('');
+        const toastType = ref('success');
+        const copyButtonText = ref('Copy All Recommendations');
+        const cloudSyncStatus = ref('connecting');
+
+        // Settled plays ledger across all markets (Synchronized with Cloud Firestore)
+        const settledGrades = ref({});
+
+        // --- Cloud Firestore Real-Time Synchronization Engine ---
+        const firebaseConfig = {
+            apiKey: "AIzaSyBWBpE28Lw1ConFoRuCAK2VK_8GRmW4xcE",
+            authDomain: "nfl-model-historical-tracker.firebaseapp.com",
+            projectId: "nfl-model-historical-tracker",
+            storageBucket: "nfl-model-historical-tracker.firebasestorage.app",
+            messagingSenderId: "52381425444",
+            appId: "1:52381425444:web:28455d003140fe96a61db1",
+            measurementId: "G-BQJGQB54Y5"
+        };
+
+        let db = null;
+        let isCloudLoaded = false;
+
+        const initFirebase = () => {
+            if (typeof firebase !== 'undefined' && firebaseConfig && firebaseConfig.apiKey) {
+                try {
+                    if (!firebase.apps || firebase.apps.length === 0) {
+                        firebase.initializeApp(firebaseConfig);
+                    }
+                    db = firebase.firestore();
+
+                    try {
+                        firebase.auth().signInAnonymously().catch(() => {});
+                    } catch (e) {}
+
+                    // Background Real-Time Snapshot Listener for NFL historical records
+                    db.collection('nfl_tracker_shared').doc('main').onSnapshot(doc => {
+                        isCloudLoaded = true;
+                        if (doc.exists) {
+                            const data = doc.data();
+                            if (data && data.grades && typeof data.grades === 'object') {
+                                settledGrades.value = { ...data.grades };
+                            }
+                        }
+                        cloudSyncStatus.value = 'synced';
+                    }, err => {
+                        console.warn('Firestore Background Listener Notice:', err);
+                        isCloudLoaded = true;
+                        cloudSyncStatus.value = 'synced';
+                    });
+
+                } catch (e) {
+                    console.warn('Firebase init exception:', e);
+                    isCloudLoaded = true;
+                    cloudSyncStatus.value = 'synced';
+                }
+            } else {
+                isCloudLoaded = true;
+                cloudSyncStatus.value = 'synced';
+            }
+        };
+
+        const saveSettledPlayToCloud = async (docId, record) => {
+            if (!isCloudLoaded || !db) return;
+            try {
+                cloudSyncStatus.value = 'syncing';
+                await db.collection('nfl_tracker_shared').doc('main').set({
+                    grades: {
+                        [docId]: record
+                    },
+                    updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+                }, { merge: true });
+                cloudSyncStatus.value = 'synced';
+            } catch (err) {
+                console.warn('Error saving play to Firestore:', err);
+            }
+        };
+
+        // Fully Automated Background Historical Season Sync directly from Google Sheets
+        const autoSyncHistoricalSeasonFromSheets = async () => {
+            isHistoricalSyncing.value = true;
+            cloudSyncStatus.value = 'syncing';
+
+            const spreadTabVariants = ['nfl26', 'NFL26', 'nfl_26', 'nfl', 'Sheet1', ''];
+            const totalTabVariants  = ['nfltotals26', 'NFLTotals26', 'nfltotals', 'totals26', 'totals', 'Sheet1', ''];
+
+            const fetchAnyTab = async (sheetId, variants) => {
+                for (const v of variants) {
+                    const tabParam = v ? `&sheet=${v}` : '';
+                    const urls = [
+                        `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv${tabParam}`,
+                        `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv${tabParam}`,
+                        `https://api.allorigins.win/raw?url=${encodeURIComponent(`https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv${tabParam}`)}`,
+                        `https://corsproxy.io/?url=${encodeURIComponent(`https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv${tabParam}`)}`
+                    ];
+                    for (const u of urls) {
+                        try {
+                            const res = await fetch(u);
+                            if (res && res.ok) {
+                                const txt = await res.text();
+                                if (txt && (txt.includes('road') || txt.includes('home') || txt.includes('line') || txt.includes('hscore') || txt.includes('total'))) {
+                                    return txt;
+                                }
+                            }
+                        } catch (e) {}
+                    }
+                }
+                return null;
+            };
+
+            const [sCsv, tCsv] = await Promise.all([
+                fetchAnyTab(spreadSheetId, spreadTabVariants),
+                fetchAnyTab(totalSheetId, totalTabVariants)
+            ]);
+
+            let spreadRows = [];
+            let totalRows = [];
+            if (sCsv) {
+                const res = Papa.parse(sCsv, { header: true, skipEmptyLines: true });
+                if (res?.data) spreadRows = res.data;
+            }
+            if (tCsv) {
+                const res = Papa.parse(tCsv, { header: true, skipEmptyLines: true });
+                if (res?.data) totalRows = res.data;
+            }
+
+            if (spreadRows.length > 0) {
+                processAndPersistHistoricalRows(spreadRows, totalRows);
+            } else {
+                cloudSyncStatus.value = 'synced';
+            }
+            isHistoricalSyncing.value = false;
+        };
+
+        const processAndPersistHistoricalRows = (spreadData, totalData) => {
+            let processed = 0;
+
+            const parseScoreField = (r, prefixList) => {
+                for (const p of prefixList) {
+                    for (const k of Object.keys(r)) {
+                        const cleanK = k.toLowerCase().replace(/[^a-z0-9]/g, '');
+                        if (cleanK === p || cleanK === 'score' + p || cleanK.includes(p)) {
+                            const val = parseNum(r[k]);
+                            if (val !== null) return val;
+                        }
+                    }
+                }
+                return null;
+            };
+
+            const findMatchingTotal = (home, road, week) => {
+                const hCanon = canonicalizeNflTeam(home);
+                const rCanon = canonicalizeNflTeam(road);
+                return (totalData || []).find(t => {
+                    const th = canonicalizeNflTeam(t.home || t.Home);
+                    const tr = canonicalizeNflTeam(t.road || t.Road || t.visitor || t.away);
+                    const tw = t.week || t.Week || t.wk;
+                    const wMatch = !week || !tw || String(week) === String(tw);
+                    return wMatch && ((th === hCanon && tr === rCanon) || (th === rCanon && tr === hCanon));
+                }) || {};
+            };
+
+            spreadData.forEach(r => {
+                const home = r.home || r.Home;
+                const road = r.road || r.Road || r.visitor || r.away;
+                if (!home || home === 'home' || home === 'Home') return;
+
+                const awayScore = parseScoreField(r, ['rscore', 'roadscore', 'vscore', 'awayscore', 'scoreaway', 'rpts', 'roadpts']);
+                const homeScore = parseScoreField(r, ['hscore', 'homescore', 'scorehome', 'hpts', 'homepts']);
+                const weekVal = r.week || r.Week || r.wk || null;
+                const dateVal = r.date || r.Date || r.gdate || null;
+                const gameDate = dateVal ? getGameDateIso(dateVal) : getTodayIso();
+
+                const matchedTotal = findMatchingTotal(home, road, weekVal);
+
+                const dummy = {
+                    home,
+                    road,
+                    neutral: parseNum(r.neutral) || 0,
+                    rawSpread: r,
+                    rawTotal: matchedTotal,
+                    liveLine: null,
+                    espnLine: null,
+                    liveTotal: null,
+                    espnTotal: null,
+                    espnHomeMl: null,
+                    espnAwayMl: null,
+                    spreadResult: null,
+                    mlResult: null,
+                    totalResult: null
+                };
+
+                analyzeGame(dummy);
+
+                if (awayScore !== null && homeScore !== null) {
+                    const actualHomeMargin = homeScore - awayScore;
+                    const actualTotalPoints = homeScore + awayScore;
+
+                    // Grade Spread
+                    let spreadGrade = 'P';
+                    const spreadLine = dummy.liveLine !== null ? dummy.liveLine : 0;
+                    if (dummy.spreadResult.finalDir === 'Home') {
+                        if (actualHomeMargin > spreadLine) spreadGrade = 'W';
+                        else if (actualHomeMargin < spreadLine) spreadGrade = 'L';
+                    } else {
+                        if (actualHomeMargin < spreadLine) spreadGrade = 'W';
+                        else if (actualHomeMargin > spreadLine) spreadGrade = 'L';
+                    }
+
+                    // Grade ML
+                    let mlGrade = 'L';
+                    if (dummy.mlResult.targetDir === 'Home' && homeScore > awayScore) mlGrade = 'W';
+                    else if (dummy.mlResult.targetDir === 'Away' && awayScore > homeScore) mlGrade = 'W';
+                    else if (homeScore === awayScore) mlGrade = 'P';
+
+                    // Grade Total
+                    let totalGrade = 'P';
+                    const marketTotal = dummy.liveTotal !== null ? dummy.liveTotal : 44.5;
+                    if (dummy.totalResult.direction === 'OVER') {
+                        if (actualTotalPoints > marketTotal) totalGrade = 'W';
+                        else if (actualTotalPoints < marketTotal) totalGrade = 'L';
+                    } else {
+                        if (actualTotalPoints < marketTotal) totalGrade = 'W';
+                        else if (actualTotalPoints > marketTotal) totalGrade = 'L';
+                    }
+
+                    const docId = `hist_${canonicalizeNflTeam(road)}_${canonicalizeNflTeam(home)}_${gameDate}`.replace(/[^a-zA-Z0-9_-]/g, '_');
+                    const record = {
+                        date: gameDate,
+                        week: weekVal,
+                        road,
+                        home,
+                        awayScore,
+                        homeScore,
+                        spreadPick: `${dummy.spreadResult?.targetTeam} ${formatBetSpread(spreadLine, dummy.spreadResult?.finalDir)}`,
+                        spreadSignal: dummy.spreadResult?.finalAction,
+                        spreadGrade,
+                        mlPick: `${dummy.mlResult?.targetTeam} (${dummy.mlResult?.targetMlFormatted})`,
+                        mlSignal: dummy.mlResult?.finalAction,
+                        mlMargin: dummy.mlResult?.margin,
+                        mlGrade,
+                        totalPick: dummy.totalResult?.pickText || '—',
+                        totalSignal: dummy.totalResult?.finalAction,
+                        totalGrade,
+                        hasSettled: true,
+                        isHistorical: true,
+                        updatedAt: new Date().toISOString()
+                    };
+
+                    settledGrades.value[docId] = record;
+                    saveSettledPlayToCloud(docId, record);
+                    processed++;
+                }
+            });
+
+            if (processed > 0) {
+                showToast(`Auto-synced & graded ${processed} historical games directly to Firestore!`, 'success');
+            }
+        };
+
+        const availableWeeks = computed(() => {
+            const weeksSet = new Set();
+            Object.values(settledGrades.value).forEach(item => {
+                if (item?.week) weeksSet.add(String(item.week));
+            });
+            return Array.from(weeksSet).sort((a, b) => (parseInt(a, 10) || 0) - (parseInt(b, 10) || 0));
+        });
+
+        const getGameDateIso = (dateSource) => {
+            if (!dateSource) return null;
+            try {
+                const d = (dateSource instanceof Date) ? dateSource : new Date(dateSource);
+                if (isNaN(d.getTime())) return null;
+                return new Intl.DateTimeFormat('en-CA', {
+                    timeZone: 'America/New_York',
+                    year: 'numeric',
+                    month: '2-digit',
+                    day: '2-digit'
+                }).format(d);
+            } catch (e) {
+                const d = (dateSource instanceof Date) ? dateSource : new Date(dateSource);
+                const year = d.getFullYear();
+                const month = String(d.getMonth() + 1).padStart(2, '0');
+                const day = String(d.getDate()).padStart(2, '0');
+                return `${year}-${month}-${day}`;
+            }
+        };
+
+        const getTodayIso = () => getGameDateIso(new Date());
+
+        const getYesterdayIso = () => {
+            const d = new Date();
+            d.setDate(d.getDate() - 1);
+            return getGameDateIso(d);
+        };
+
+        const isDateInTimeframe = (dateStr, tf) => {
+            if (tf === 'season') return true;
+            if (!dateStr) return tf === 'today';
+
+            const todayIso = getTodayIso();
+            const yestIso = getYesterdayIso();
+
+            if (tf === 'today') return dateStr === todayIso;
+            if (tf === 'yesterday') return dateStr === yestIso;
+
+            const parts = String(dateStr).split('-');
+            if (parts.length < 3) return tf === 'season';
+            const [y, m, d] = parts.map(Number);
+            const itemDate = new Date(y, m - 1, d);
+
+            if (tf === 'week') {
+                const curr = new Date();
+                const first = curr.getDate() - curr.getDay() + 1;
+                const monday = new Date(curr.setDate(first));
+                monday.setHours(0, 0, 0, 0);
+                return itemDate >= monday;
+            }
+            if (tf === 'month') {
+                const now = new Date();
+                return itemDate.getFullYear() === now.getFullYear() && itemDate.getMonth() === now.getMonth();
+            }
+            return true;
+        };
+
+        const viewModes = [
+            { id: 'all', label: 'All Markets' },
+            { id: 'spread', label: '🏈 Spread' },
+            { id: 'ml', label: '💰 ML' },
+            { id: 'total', label: '📊 Total' }
+        ];
+
+        const filterOptions = [
+            { id: 'all', label: 'All Games' },
+            { id: 'live', label: '🔴 Live Now' },
+            { id: 'strongSpread', label: '🏈 Strong Spread (≥2.5)' },
+            { id: 'strongMl', label: '💰 Strong ML (|Margin| ≥ 6.0)' },
+            { id: 'strongTotal', label: '📊 Strong Totals (2.5 - 4.5)' }
+        ];
+
+        const timeframeOptions = [
+            { id: 'season', label: 'This Season' },
+            { id: 'today', label: 'Today' },
+            { id: 'yesterday', label: 'Yesterday' },
+            { id: 'week', label: 'This Week' },
+            { id: 'month', label: 'This Month' }
+        ];
+
+        // NFL Spread Model Tiers (Tier 1: 5 models, Tier 2: 7 models, Tier 3: 8 models)
+        const spreadModelTiers = {
+            t1: ['lineeff', 'linecong', 'lineclean', 'lineffw', 'linel2'],
+            t2: ['linecoff', 'linelog', 'linepi', 'linedonchess', 'linepyth', 'linel1', 'linemed'],
+            t3: ['linedok', 'linecurry', 'lineavg', 'linemass', 'lineppg', 'lineespn', 'linesaggm', 'linesag']
+        };
+
+        // NFL Moneyline Model Tiers (Tier 1: 21 models, Tier 2: 21 models, Tier 3: 22 models)
+        const mlModelTiers = {
+            t1: [
+                'linefeng', 'lineherbert', 'linegt', 'linesagr', 'lineca', 'linemass',
+                'linemed', 'linenfelo', 'lineavg', 'linemore', 'lineespn', 'linedonchess',
+                'linesag', 'linestjohn', 'lineteamrank', 'linecovers', 'linesaggm', 'linebihl',
+                'lineffw', 'linepib', 'lineform'
+            ],
+            t2: [
+                'linepi', 'linecong', 'linesagp', 'lineARGH', 'linepim', 'linedok',
+                'linecoff', 'linedoi', 'linecurry', 'linedunk', 'lineash', 'lineesp2',
+                'linetalis', 'linesage', 'linepz', 'linepig', 'linel2', 'lineppg',
+                'linegametime', 'linekerns', 'linepugh'
+            ],
+            t3: [
+                'linel1', 'linejohns', 'linel2to', 'lineeff', 'linepyth', 'lineesp',
+                'linejens', 'lineelo', 'linefox', 'lineclean', 'linelog', 'linerwp',
+                'lineround', 'linehanson', 'lineexcel', 'lineshark', 'linel2h', 'linedwig',
+                'linegrok', 'lineturner', 'lineexcel2', 'linejens2'
+            ]
+        };
+
+        // NFL Total Model Tiers (Tier 1: 4 models, Tier 2: 6 models, Tier 3: 5 models)
+        const totalModelTiers = {
+            t1: ['totdonchess', 'totturing', 'totffw', 'totpugh'],
+            t2: ['totavg', 'totmed', 'totmass', 'totclean', 'totargh', 'totpirate'],
+            t3: ['totsag', 'totrwp', 'totashby', 'totcurry', 'totkerns']
+        };
+
+        const columnAliases = {
+            lineeff: ['lineeff', 'eff', 'line eff', 'line_eff'],
+            linecong: ['linecong', 'cong', 'line cong', 'line_cong'],
+            lineclean: ['lineclean', 'clean', 'line clean', 'line_clean'],
+            lineffw: ['lineffw', 'ffw', 'line ffw', 'line_ffw'],
+            linel2: ['linel2', 'l2', 'line l2', 'line_l2'],
+            linecoff: ['linecoff', 'coff', 'line coff', 'line_coff'],
+            linelog: ['linelog', 'log', 'line log', 'line_log'],
+            linepi: ['linepi', 'pi', 'line pi', 'line_pi'],
+            linedonchess: ['linedonchess', 'donchess', 'don chess', 'line donchess', 'line_donchess'],
+            linepyth: ['linepyth', 'pyth', 'line pyth', 'line_pyth', 'pythagorean'],
+            linel1: ['linel1', 'l1', 'line l1', 'line_l1'],
+            linemed: ['linemed', 'med', 'line med', 'line_med', 'median'],
+            linedok: ['linedok', 'dok', 'line dok', 'line_dok', 'linedoi'],
+            linecurry: ['linecurry', 'curry', 'line curry', 'line_curry'],
+            lineavg: ['lineavg', 'line avg', 'avg', 'line_avg', 'average'],
+            linemass: ['linemass', 'mass', 'line mass', 'line_mass', 'linemassey', 'massey'],
+            lineppg: ['lineppg', 'ppg', 'line ppg', 'line_ppg'],
+            lineespn: ['lineespn', 'espn', 'line espn', 'line_espn', 'fpi'],
+            linesaggm: ['linesaggm', 'saggm', 'sag gm', 'line saggm', 'line_saggm'],
+            linesag: ['linesag', 'sag', 'line sag', 'line_sag', 'sagarin', 'linesage', 'linesagp'],
+            totdonchess: ['totdonchess', 'donchess', 'tot donchess', 'total donchess', 'totaldonchess', 'donchesstot'],
+            totturing: ['totturing', 'turing', 'tot turing', 'total turing', 'totalturing', 'turingtot'],
+            totffw: ['totffw', 'ffw', 'tot ffw', 'total ffw', 'totalffw', 'ffwtot'],
+            totpugh: ['totpugh', 'pugh', 'tot pugh', 'total pugh', 'totalpugh', 'pughtot'],
+            totavg: ['totavg', 'avg', 'tot avg', 'total avg', 'totalavg', 'average', 'ouavg', 'tot_avg'],
+            totmed: ['totmed', 'med', 'tot med', 'total med', 'totalmed', 'median', 'tot_med'],
+            totmass: ['totmass', 'mass', 'tot mass', 'total mass', 'totalmass', 'massey', 'totmassey', 'totalmassey'],
+            totclean: ['totclean', 'clean', 'tot clean', 'total clean', 'totalclean'],
+            totargh: ['totargh', 'argh', 'tot argh', 'total argh', 'totalargh'],
+            totpirate: ['totpirate', 'pirate', 'tot pirate', 'total pirate', 'totalpirate'],
+            totsag: ['totsag', 'sag', 'tot sag', 'total sag', 'totalsag', 'sagarin', 'totalsagp', 'sagtotal'],
+            totrwp: ['totrwp', 'rwp', 'tot rwp', 'total rwp', 'totalrwp'],
+            totashby: ['totashby', 'ashby', 'tot ashby', 'total ashby', 'totalashby', 'ash'],
+            totcurry: ['totcurry', 'curry', 'tot curry', 'total curry', 'totalcurry'],
+            totkerns: ['totkerns', 'kerns', 'tot kerns', 'total kerns', 'totalkerns']
+        };
+
+        const getModelVal = (rawRow, key) => {
+            if (!rawRow) return null;
+            const cleanKey = String(key).toLowerCase().replace(/[^a-z0-9]/g, '');
+            const strippedKey = cleanKey.replace(/^(line|tot|total)/, '');
+
+            const candidates = columnAliases[key] || [key];
+            for (const candidate of candidates) {
+                if (rawRow[candidate] !== undefined && rawRow[candidate] !== null && rawRow[candidate] !== '') {
+                    return rawRow[candidate];
+                }
+            }
+            for (const rowKey of Object.keys(rawRow)) {
+                const cleanRowKey = rowKey.toLowerCase().replace(/[^a-z0-9]/g, '');
+                if (cleanRowKey === cleanKey || cleanRowKey === strippedKey || cleanRowKey === 'line' + strippedKey || cleanRowKey === 'tot' + strippedKey || cleanRowKey === 'total' + strippedKey) {
+                    if (rawRow[rowKey] !== undefined && rawRow[rowKey] !== null && rawRow[rowKey] !== '') {
+                        return rawRow[rowKey];
+                    }
+                }
+            }
+            return null;
+        };
+
+        const showToast = (msg, type = 'success') => {
+            toastMessage.value = msg;
+            toastType.value = type;
+            setTimeout(() => { toastMessage.value = ''; }, 3500);
+        };
+
+        // All 32 NFL Teams Metadata & Synonyms
+        const NFL_TEAMS_DATA = [
+            { key: 'cardinals', city: 'Arizona', mascot: 'Cardinals', name: 'Arizona Cardinals', syn: ['ari', 'arizona', 'cardinals', 'cards', 'az'] },
+            { key: 'falcons', city: 'Atlanta', mascot: 'Falcons', name: 'Atlanta Falcons', syn: ['atl', 'atlanta', 'falcons', 'dirty birds'] },
+            { key: 'ravens', city: 'Baltimore', mascot: 'Ravens', name: 'Baltimore Ravens', syn: ['bal', 'baltimore', 'ravens'] },
+            { key: 'bills', city: 'Buffalo', mascot: 'Bills', name: 'Buffalo Bills', syn: ['buf', 'buffalo', 'bills', 'bills mafia'] },
+            { key: 'panthers', city: 'Carolina', mascot: 'Panthers', name: 'Carolina Panthers', syn: ['car', 'carolina', 'panthers'] },
+            { key: 'bears', city: 'Chicago', mascot: 'Bears', name: 'Chicago Bears', syn: ['chi', 'chicago', 'bears', 'monsters of the midway'] },
+            { key: 'bengals', city: 'Cincinnati', mascot: 'Bengals', name: 'Cincinnati Bengals', syn: ['cin', 'cincinnati', 'bengals', 'who dey'] },
+            { key: 'browns', city: 'Cleveland', mascot: 'Browns', name: 'Cleveland Browns', syn: ['cle', 'cleveland', 'browns'] },
+            { key: 'cowboys', city: 'Dallas', mascot: 'Cowboys', name: 'Dallas Cowboys', syn: ['dal', 'dallas', 'cowboys', 'americas team'] },
+            { key: 'broncos', city: 'Denver', mascot: 'Broncos', name: 'Denver Broncos', syn: ['den', 'denver', 'broncos'] },
+            { key: 'lions', city: 'Detroit', mascot: 'Lions', name: 'Detroit Lions', syn: ['det', 'detroit', 'lions'] },
+            { key: 'packers', city: 'Green Bay', mascot: 'Packers', name: 'Green Bay Packers', syn: ['gb', 'green bay', 'packers'] },
+            { key: 'texans', city: 'Houston', mascot: 'Texans', name: 'Houston Texans', syn: ['hou', 'houston', 'texans'] },
+            { key: 'colts', city: 'Indianapolis', mascot: 'Colts', name: 'Indianapolis Colts', syn: ['ind', 'indianapolis', 'colts', 'indy'] },
+            { key: 'jaguars', city: 'Jacksonville', mascot: 'Jaguars', name: 'Jacksonville Jaguars', syn: ['jax', 'jacksonville', 'jaguars', 'jags'] },
+            { key: 'chiefs', city: 'Kansas City', mascot: 'Chiefs', name: 'Kansas City Chiefs', syn: ['kc', 'kansas city', 'chiefs', 'chiefs kingdom', 'kan'] },
+            { key: 'raiders', city: 'Las Vegas', mascot: 'Raiders', name: 'Las Vegas Raiders', syn: ['lv', 'las vegas', 'raiders', 'oakland raiders', 'oak'] },
+            { key: 'chargers', city: 'Los Angeles Chargers', mascot: 'Chargers', name: 'LA Chargers', syn: ['lac', 'chargers', 'la chargers', 'los angeles chargers', 'sd'] },
+            { key: 'rams', city: 'Los Angeles Rams', mascot: 'Rams', name: 'LA Rams', syn: ['lar', 'rams', 'la rams', 'los angeles rams', 'stl'] },
+            { key: 'dolphins', city: 'Miami', mascot: 'Dolphins', name: 'Miami Dolphins', syn: ['mia', 'miami', 'dolphins', 'fins'] },
+            { key: 'vikings', city: 'Minnesota', mascot: 'Vikings', name: 'Minnesota Vikings', syn: ['min', 'minnesota', 'vikings', 'vikes'] },
+            { key: 'patriots', city: 'New England', mascot: 'Patriots', name: 'New England Patriots', syn: ['ne', 'new england', 'patriots', 'pats', 'nep'] },
+            { key: 'saints', city: 'New Orleans', mascot: 'Saints', name: 'New Orleans Saints', syn: ['no', 'new orleans', 'saints', 'who dat', 'nos'] },
+            { key: 'giants', city: 'New York Giants', mascot: 'Giants', name: 'NY Giants', syn: ['nyg', 'giants', 'ny giants', 'new york giants'] },
+            { key: 'jets', city: 'New York Jets', mascot: 'Jets', name: 'NY Jets', syn: ['nyj', 'jets', 'ny jets', 'new york jets'] },
+            { key: 'eagles', city: 'Philadelphia', mascot: 'Eagles', name: 'Philadelphia Eagles', syn: ['phi', 'philadelphia', 'eagles', 'birds', 'philly'] },
+            { key: 'steelers', city: 'Pittsburgh', mascot: 'Steelers', name: 'Pittsburgh Steelers', syn: ['pit', 'pittsburgh', 'steelers', 'black and gold'] },
+            { key: '49ers', city: 'San Francisco', mascot: '49ers', name: 'San Francisco 49ers', syn: ['sf', 'san francisco', '49ers', 'niners', 'sf 49ers'] },
+            { key: 'seahawks', city: 'Seattle', mascot: 'Seahawks', name: 'Seattle Seahawks', syn: ['sea', 'seattle', 'seahawks', 'hawks', '12th man'] },
+            { key: 'buccaneers', city: 'Tampa Bay', mascot: 'Buccaneers', name: 'Tampa Bay Buccaneers', syn: ['tb', 'tampa bay', 'buccaneers', 'bucs', 'tampa'] },
+            { key: 'titans', city: 'Tennessee', mascot: 'Titans', name: 'Tennessee Titans', syn: ['ten', 'tennessee', 'titans'] },
+            { key: 'commanders', city: 'Washington', mascot: 'Commanders', name: 'Washington Commanders', syn: ['was', 'washington', 'commanders', 'wsh', 'football team', 'redskins'] }
+        ];
+
+        // 32-Team Advanced NFL EPA and Efficiency Database
+        const NFL_RATINGS = {
+            chiefs: { offEpa: 0.12, defEpa: -0.09, netEpa: 0.21, passEpa: 0.18, rushEpa: 0.04, ppg: 25.8, oppPpg: 17.6, turnoverMargin: 5, record: '12-3' },
+            ravens: { offEpa: 0.24, defEpa: -0.02, netEpa: 0.26, passEpa: 0.28, rushEpa: 0.16, ppg: 30.4, oppPpg: 21.8, turnoverMargin: 8, record: '11-4' },
+            bills: { offEpa: 0.20, defEpa: -0.05, netEpa: 0.25, passEpa: 0.22, rushEpa: 0.11, ppg: 29.2, oppPpg: 19.5, turnoverMargin: 9, record: '11-4' },
+            lions: { offEpa: 0.25, defEpa: -0.03, netEpa: 0.28, passEpa: 0.26, rushEpa: 0.18, ppg: 31.6, oppPpg: 20.2, turnoverMargin: 7, record: '13-2' },
+            eagles: { offEpa: 0.16, defEpa: -0.11, netEpa: 0.27, passEpa: 0.15, rushEpa: 0.17, ppg: 27.4, oppPpg: 17.8, turnoverMargin: 6, record: '12-3' },
+            vikings: { offEpa: 0.10, defEpa: -0.14, netEpa: 0.24, passEpa: 0.14, rushEpa: 0.02, ppg: 26.2, oppPpg: 18.2, turnoverMargin: 10, record: '12-3' },
+            steelers: { offEpa: 0.04, defEpa: -0.10, netEpa: 0.14, passEpa: 0.06, rushEpa: 0.03, ppg: 23.5, oppPpg: 18.4, turnoverMargin: 11, record: '10-5' },
+            packers: { offEpa: 0.15, defEpa: -0.04, netEpa: 0.19, passEpa: 0.19, rushEpa: 0.08, ppg: 26.8, oppPpg: 20.6, turnoverMargin: 4, record: '11-4' },
+            chargers: { offEpa: 0.05, defEpa: -0.15, netEpa: 0.20, passEpa: 0.09, rushEpa: 0.02, ppg: 22.1, oppPpg: 16.4, turnoverMargin: 8, record: '9-6' },
+            commanders: { offEpa: 0.18, defEpa: -0.01, netEpa: 0.19, passEpa: 0.21, rushEpa: 0.12, ppg: 28.5, oppPpg: 22.4, turnoverMargin: 4, record: '10-5' },
+            texans: { offEpa: 0.06, defEpa: -0.08, netEpa: 0.14, passEpa: 0.08, rushEpa: 0.02, ppg: 23.8, oppPpg: 21.0, turnoverMargin: 3, record: '9-6' },
+            broncos: { offEpa: 0.03, defEpa: -0.12, netEpa: 0.15, passEpa: 0.04, rushEpa: 0.01, ppg: 22.8, oppPpg: 18.2, turnoverMargin: 6, record: '9-6' },
+            cardinals: { offEpa: 0.08, defEpa: 0.02, netEpa: 0.06, passEpa: 0.09, rushEpa: 0.07, ppg: 24.2, oppPpg: 23.4, turnoverMargin: 1, record: '7-8' },
+            seahawks: { offEpa: 0.05, defEpa: 0.01, netEpa: 0.04, passEpa: 0.08, rushEpa: -0.01, ppg: 23.6, oppPpg: 23.0, turnoverMargin: 0, record: '8-7' },
+            rams: { offEpa: 0.07, defEpa: 0.03, netEpa: 0.04, passEpa: 0.10, rushEpa: 0.01, ppg: 22.9, oppPpg: 23.8, turnoverMargin: -1, record: '8-7' },
+            '49ers': { offEpa: 0.11, defEpa: 0.02, netEpa: 0.09, passEpa: 0.14, rushEpa: 0.05, ppg: 24.8, oppPpg: 24.1, turnoverMargin: 1, record: '6-9' },
+            buccaneers: { offEpa: 0.14, defEpa: 0.06, netEpa: 0.08, passEpa: 0.18, rushEpa: 0.04, ppg: 28.2, oppPpg: 25.8, turnoverMargin: 2, record: '8-7' },
+            falcons: { offEpa: 0.06, defEpa: 0.04, netEpa: 0.02, passEpa: 0.07, rushEpa: 0.04, ppg: 23.0, oppPpg: 24.5, turnoverMargin: -3, record: '7-8' },
+            dolphins: { offEpa: 0.02, defEpa: -0.01, netEpa: 0.03, passEpa: 0.05, rushEpa: -0.02, ppg: 21.4, oppPpg: 22.0, turnoverMargin: -2, record: '7-8' },
+            colts: { offEpa: 0.01, defEpa: 0.03, netEpa: -0.02, passEpa: 0.01, rushEpa: 0.03, ppg: 21.8, oppPpg: 23.2, turnoverMargin: 2, record: '7-8' },
+            bengals: { offEpa: 0.17, defEpa: 0.10, netEpa: 0.07, passEpa: 0.22, rushEpa: 0.02, ppg: 27.6, oppPpg: 26.9, turnoverMargin: 1, record: '7-8' },
+            cowboys: { offEpa: -0.04, defEpa: 0.08, netEpa: -0.12, passEpa: -0.01, rushEpa: -0.08, ppg: 21.0, oppPpg: 27.8, turnoverMargin: -5, record: '6-9' },
+            bears: { offEpa: -0.06, defEpa: -0.07, netEpa: 0.01, passEpa: -0.04, rushEpa: -0.04, ppg: 19.5, oppPpg: 19.8, turnoverMargin: 4, record: '4-11' },
+            saints: { offEpa: 0.02, defEpa: 0.05, netEpa: -0.03, passEpa: 0.04, rushEpa: -0.01, ppg: 23.5, oppPpg: 24.8, turnoverMargin: 0, record: '5-10' },
+            jets: { offEpa: -0.05, defEpa: -0.03, netEpa: -0.02, passEpa: -0.02, rushEpa: -0.06, ppg: 19.8, oppPpg: 22.6, turnoverMargin: -3, record: '4-11' },
+            patriots: { offEpa: -0.12, defEpa: 0.01, netEpa: -0.13, passEpa: -0.10, rushEpa: -0.08, ppg: 16.4, oppPpg: 22.8, turnoverMargin: -4, record: '3-12' },
+            browns: { offEpa: -0.16, defEpa: 0.00, netEpa: -0.16, passEpa: -0.18, rushEpa: -0.05, ppg: 16.2, oppPpg: 24.5, turnoverMargin: -7, record: '3-12' },
+            jaguars: { offEpa: -0.06, defEpa: 0.12, netEpa: -0.18, passEpa: -0.03, rushEpa: -0.06, ppg: 19.2, oppPpg: 27.5, turnoverMargin: -6, record: '3-12' },
+            titans: { offEpa: -0.10, defEpa: -0.02, netEpa: -0.08, passEpa: -0.09, rushEpa: -0.04, ppg: 18.0, oppPpg: 24.0, turnoverMargin: -12, record: '3-12' },
+            panthers: { offEpa: -0.08, defEpa: 0.16, netEpa: -0.24, passEpa: -0.05, rushEpa: -0.07, ppg: 18.5, oppPpg: 30.2, turnoverMargin: -8, record: '4-11' },
+            raiders: { offEpa: -0.14, defEpa: 0.05, netEpa: -0.19, passEpa: -0.12, rushEpa: -0.11, ppg: 18.2, oppPpg: 26.4, turnoverMargin: -11, record: '3-12' },
+            giants: { offEpa: -0.15, defEpa: 0.03, netEpa: -0.18, passEpa: -0.14, rushEpa: -0.09, ppg: 16.0, oppPpg: 24.2, turnoverMargin: -5, record: '2-13' }
+        };
+
+        const canonicalizeNflTeam = (name) => {
+            if (!name) return '';
+            let s = String(name).toLowerCase().trim().replace(/&/g, ' and ').replace(/['’]/g, '').replace(/[-().,]/g, ' ');
+            s = s.replace(/\s+/g, ' ').trim();
+            for (const t of NFL_TEAMS_DATA) {
+                if (t.key === s || t.city.toLowerCase() === s || t.mascot.toLowerCase() === s || t.name.toLowerCase() === s) {
+                    return t.key;
+                }
+                if (t.syn.some(syn => syn.replace(/['’.-]/g, '').toLowerCase() === s)) {
+                    return t.key;
+                }
+            }
+            for (const t of NFL_TEAMS_DATA) {
+                if (s.includes(t.key) || s.includes(t.mascot.toLowerCase()) || s.includes(t.city.toLowerCase())) {
+                    return t.key;
+                }
+            }
+            return s;
+        };
+
+        const getTeamRatings = (teamName) => {
+            const canon = canonicalizeNflTeam(teamName);
+            return NFL_RATINGS[canon] || {
+                offEpa: 0.00, defEpa: 0.00, netEpa: 0.00, passEpa: 0.00, rushEpa: 0.00, ppg: 22.0, oppPpg: 22.0, turnoverMargin: 0, record: '8-8'
+            };
+        };
+
+        const getTeamSearchTokens = (teamName) => {
+            if (!teamName) return [];
+            const canon = canonicalizeNflTeam(teamName);
+            const matched = NFL_TEAMS_DATA.find(t => t.key === canon);
+            if (matched) {
+                return [canon, matched.city.toLowerCase(), matched.mascot.toLowerCase(), matched.name.toLowerCase(), ...matched.syn];
+            }
+            return [String(teamName).toLowerCase()];
+        };
+
+        const gameMatchesSearch = (game, queryStr) => {
+            if (!queryStr) return true;
+            const rawQ = String(queryStr).toLowerCase().trim();
+            if (!rawQ) return true;
+
+            const homeTokens = getTeamSearchTokens(game.home);
+            const roadTokens = getTeamSearchTokens(game.road);
+            const allTokens = [...homeTokens, ...roadTokens];
+            if (game.spreadResult?.targetTeam) allTokens.push(...getTeamSearchTokens(game.spreadResult.targetTeam));
+            if (game.mlResult?.targetTeam) allTokens.push(...getTeamSearchTokens(game.mlResult.targetTeam));
+
+            const cleanTokens = allTokens.map(t => t.toLowerCase().replace(/['’.-]/g, ''));
+            const qWords = rawQ.replace(/['’.-]/g, '').split(/\s+/).filter(w => w && w !== 'vs' && w !== 'at');
+
+            return qWords.every(word => cleanTokens.some(token => token.includes(word) || word.includes(token)));
+        };
+
+        const parseNum = (val) => {
+            if (val === undefined || val === null || val === '') return null;
+            const cleaned = String(val).replace(/[^0-9.-]/g, '');
+            const num = parseFloat(cleaned);
+            return Number.isFinite(num) ? num : null;
+        };
+
+        const formatMetric = (val) => {
+            const num = parseNum(val);
+            if (num === null) return '—';
+            return num > 0 ? `+${num.toFixed(1).replace(/\.0$/, '')}` : `${num.toFixed(1).replace(/\.0$/, '')}`;
+        };
+
+        const formatDeltaNum = (val) => {
+            const num = parseNum(val);
+            if (num === null) return '0.0';
+            return num.toFixed(1);
+        };
+
+        const formatTotalNum = (val) => {
+            const num = parseNum(val);
+            if (num === null) return '—';
+            return num.toFixed(1);
+        };
+
+        const formatModelLabel = (key) => {
+            const clean = key.replace(/^line/, '').toLowerCase();
+            const labelMap = {
+                'feng': 'FENG', 'herbert': 'HERBERT', 'gt': 'GT', 'sagr': 'SAG-R', 'ca': 'CA',
+                'mass': 'MASSEY', 'med': 'MEDIAN', 'nfelo': 'NFELO', 'avg': 'AVG', 'more': 'MOORE',
+                'espn': 'ESPN', 'donchess': 'DONCHESS', 'sag': 'SAGARIN', 'stjohn': 'ST. JOHN',
+                'teamrank': 'TEAMRANK', 'covers': 'COVERS', 'saggm': 'SAG-GM', 'bihl': 'BIHL',
+                'ffw': 'FFW', 'pib': 'PI-B', 'form': 'FORM', 'eff': 'EFF', 'cong': 'CONG',
+                'clean': 'CLEAN', 'l2': 'L2', 'pi': 'PI', 'sagp': 'SAG-P', 'argh': 'ARGH',
+                'pim': 'PI-M', 'dok': 'DOK', 'coff': 'COFF', 'doi': 'DOI', 'curry': 'CURRY',
+                'dunk': 'DUNKEL', 'ash': 'ASH', 'esp2': 'ESPN-2', 'talis': 'TALIS', 'sage': 'SAG-E',
+                'pz': 'PZ', 'pig': 'PIG', 'ppg': 'PPG', 'gametime': 'GAMETIME', 'kerns': 'KERNS',
+                'pugh': 'PUGH', 'log': 'LOG', 'pyth': 'PYTH', 'l1': 'L1', 'johns': 'JOHNS',
+                'l2to': 'L2-TO', 'esp': 'ESP', 'jens': 'JENS', 'elo': 'ELO', 'fox': 'FOX',
+                'rwp': 'RWP', 'round': 'ROUND', 'hanson': 'HANSON', 'excel': 'EXCEL', 'shark': 'SHARK',
+                'l2h': 'L2-H', 'dwig': 'DWIG', 'grok': 'GROK', 'turner': 'TURNER', 'excel2': 'EXCEL-2',
+                'jens2': 'JENS-2'
+            };
+            return labelMap[clean] || clean.toUpperCase();
+        };
+
+        const formatTotalModelLabel = (key) => {
+            const clean = key.replace(/^(tot|total)/, '').toLowerCase();
+            const totalLabels = {
+                'donchess': 'DONCHESS', 'turing': 'TURING', 'ffw': 'FFW', 'pugh': 'PUGH',
+                'avg': 'AVG', 'med': 'MEDIAN', 'mass': 'MASSEY', 'clean': 'CLEAN',
+                'argh': 'ARGH', 'pirate': 'PIRATE', 'sag': 'SAGARIN', 'rwp': 'RWP',
+                'ashby': 'ASHBY', 'curry': 'CURRY', 'kerns': 'KERNS'
+            };
+            return totalLabels[clean] || clean.toUpperCase();
+        };
+
+        const formatFavoredLabel = (game) => {
+            const lineNum = parseNum(game.liveLine !== null ? game.liveLine : game.rawSpread?.line);
+            if (lineNum === null) return 'OFF';
+            if (lineNum === 0) return 'PK';
+            if (lineNum > 0) return `${game.home} -${Math.abs(lineNum)}`;
+            return `${game.road} -${Math.abs(lineNum)}`;
+        };
+
+        const formatBetSpread = (liveLine, dir) => {
+            const line = parseNum(liveLine);
+            if (line === null || !dir || dir === 'None') return 'N/A';
+            const spreadVal = dir === 'Home' ? -line : line;
+            return spreadVal > 0 ? `+${spreadVal.toFixed(1).replace(/\.0$/, '')}` : `${spreadVal.toFixed(1).replace(/\.0$/, '')}`;
+        };
+
+        const normalCDF = (z) => {
+            if (z < -7) return 0;
+            if (z > 7) return 1;
+            const t = 1.0 / (1.0 + 0.2316419 * Math.abs(z));
+            const d = 0.3989422804014327 * Math.exp(-z * z / 2.0);
+            const p = d * t * (0.319381530 + t * (-0.356563782 + t * (1.781477937 + t * (-1.821255978 + t * 1.330274429))));
+            return z > 0 ? 1.0 - p : p;
+        };
+
+        const spreadToWinProb = (spreadMargin) => {
+            const z = spreadMargin / 13.5;
+            return normalCDF(z);
+        };
+
+        const winProbToAmericanMl = (prob) => {
+            if (prob >= 0.99) return -10000;
+            if (prob <= 0.01) return 10000;
+            if (prob >= 0.5) {
+                return Math.round(-(prob / (1 - prob)) * 100);
+            } else {
+                return Math.round(((1 - prob) / prob) * 100);
+            }
+        };
+
+        const americanMlToProb = (ml) => {
+            if (ml === null || isNaN(ml)) return 0.5;
+            if (ml < 0) {
+                return Math.abs(ml) / (Math.abs(ml) + 100);
+            } else {
+                return 100 / (ml + 100);
+            }
+        };
+
+        const formatAmericanMl = (ml) => {
+            if (ml === null || isNaN(ml)) return '—';
+            return ml > 0 ? `+${ml}` : `${ml}`;
+        };
+
+        // --- Multi-Market Analytics Engine (Spread, Moneyline, Total) ---
+        const analyzeGame = (game) => {
+            // 1. SPREAD ENGINE
+            const liveLine = game.espnLine !== null ? game.espnLine : parseNum(game.rawSpread?.line);
+            game.liveLine = liveLine;
+
+            const evaluateTier = (modelKeys) => {
+                let homeCount = 0, awayCount = 0;
+                let homeEdges = [], awayEdges = [];
+                let total = 0;
+
+                modelKeys.forEach(mKey => {
+                    const val = parseNum(getModelVal(game.rawSpread, mKey));
+                    if (val !== null && liveLine !== null) {
+                        total++;
+                        if (val > liveLine) {
+                            homeCount++;
+                            homeEdges.push(val - liveLine);
+                        } else if (val < liveLine) {
+                            awayCount++;
+                            awayEdges.push(liveLine - val);
+                        }
+                    }
+                });
+
+                if (total === 0) return { total: 0, agreeCount: 0, edge: 0, dir: 'None', status: 'NEUTRAL' };
+
+                if (homeCount > awayCount && homeCount > 0) {
+                    const avgEdge = homeEdges.reduce((a, b) => a + b, 0) / homeEdges.length;
+                    return { total, agreeCount: homeCount, edge: avgEdge, dir: 'Home', status: avgEdge >= 2.5 ? 'BET' : 'LEAN' };
+                } else if (awayCount > homeCount && awayCount > 0) {
+                    const avgEdge = awayEdges.reduce((a, b) => a + b, 0) / awayEdges.length;
+                    return { total, agreeCount: awayCount, edge: avgEdge, dir: 'Away', status: avgEdge >= 2.5 ? 'BET' : 'LEAN' };
+                }
+                return { total, agreeCount: Math.max(homeCount, awayCount), edge: 0, dir: 'Split', status: 'SPLIT' };
+            };
+
+            const t1 = evaluateTier(spreadModelTiers.t1);
+            const t2 = evaluateTier(spreadModelTiers.t2);
+            const t3 = evaluateTier(spreadModelTiers.t3);
+
+            let spreadFinalAction = 'LEAN';
+            let spreadFinalDir = 'None';
+            let t3Downgrade = false;
+            let primaryDelta = 0;
+
+            const modelAvgVal = parseNum(getModelVal(game.rawSpread, 'lineavg'));
+            const effectiveModelSpread = modelAvgVal !== null ? modelAvgVal : (liveLine !== null ? liveLine + 1.0 : 0);
+
+            if (t1.dir !== 'None' && t1.dir !== 'Split') {
+                spreadFinalDir = t1.dir;
+                primaryDelta = t1.edge;
+            } else if (t2.dir !== 'None' && t2.dir !== 'Split') {
+                spreadFinalDir = t2.dir;
+                primaryDelta = t2.edge;
+            } else {
+                if (liveLine !== null && modelAvgVal !== null) {
+                    spreadFinalDir = modelAvgVal >= liveLine ? 'Home' : 'Away';
+                    primaryDelta = Math.abs(modelAvgVal - liveLine);
+                } else {
+                    spreadFinalDir = 'Home';
+                    primaryDelta = 1.5;
+                }
+            }
+
+            if (primaryDelta >= 2.5) {
+                spreadFinalAction = 'STRONG BET';
+            } else {
+                spreadFinalAction = 'LEAN';
+            }
+
+            if (spreadFinalDir !== 'None' && t3.dir !== 'None' && t3.dir !== 'Split' && t3.dir !== spreadFinalDir) {
+                t3Downgrade = true;
+                spreadFinalAction = 'LEAN';
+            }
+
+            const targetSpreadTeam = spreadFinalDir === 'Home' ? game.home : (spreadFinalDir === 'Away' ? game.road : game.home);
+
+            game.spreadResult = {
+                t1,
+                t2,
+                t3,
+                finalAction: spreadFinalAction,
+                finalDir: spreadFinalDir,
+                targetTeam: targetSpreadTeam,
+                modelSpread: effectiveModelSpread,
+                t3Downgrade,
+                delta: primaryDelta
+            };
+
+            // 2. MONEYLINE (ML) MULTI-TIER CONSENSUS ENGINE
+            const evaluateMlTier = (modelKeys) => {
+                let homeCount = 0, awayCount = 0;
+                let homeMargins = [], awayMargins = [];
+                let allMargins = [];
+                let homeProbs = [];
+                let total = 0;
+
+                modelKeys.forEach(mKey => {
+                    const val = parseNum(getModelVal(game.rawSpread, mKey));
+                    if (val !== null) {
+                        total++;
+                        const margin = Math.abs(val);
+                        allMargins.push(margin);
+                        const homeWinP = spreadToWinProb(val);
+                        homeProbs.push(homeWinP);
+
+                        if (val > 0) {
+                            homeCount++;
+                            homeMargins.push(val);
+                        } else if (val < 0) {
+                            awayCount++;
+                            awayMargins.push(Math.abs(val));
+                        }
+                    }
+                });
+
+                if (total === 0) return { total: 0, agreeCount: 0, avgMargin: 0, winProb: 50, dir: 'None', status: 'NEUTRAL' };
+
+                const avgTierMargin = allMargins.reduce((a, b) => a + b, 0) / total;
+                const avgHomeProb = (homeProbs.reduce((a, b) => a + b, 0) / total) * 100;
+
+                if (homeCount > awayCount) {
+                    const avgMargin = homeMargins.length > 0 ? (homeMargins.reduce((a, b) => a + b, 0) / homeMargins.length) : avgTierMargin;
+                    return {
+                        total,
+                        agreeCount: homeCount,
+                        avgMargin,
+                        winProb: avgHomeProb,
+                        dir: 'Home',
+                        status: avgMargin >= 6.0 ? 'STRONG' : 'LEAN'
+                    };
+                } else if (awayCount > homeCount) {
+                    const avgMargin = awayMargins.length > 0 ? (awayMargins.reduce((a, b) => a + b, 0) / awayMargins.length) : avgTierMargin;
+                    return {
+                        total,
+                        agreeCount: awayCount,
+                        avgMargin,
+                        winProb: 100 - avgHomeProb,
+                        dir: 'Away',
+                        status: avgMargin >= 6.0 ? 'STRONG' : 'LEAN'
+                    };
+                }
+                return {
+                    total,
+                    agreeCount: homeCount,
+                    avgMargin: avgTierMargin,
+                    winProb: 50,
+                    dir: 'Split',
+                    status: 'SPLIT'
+                };
+            };
+
+            const mlT1 = evaluateMlTier(mlModelTiers.t1);
+            const mlT2 = evaluateMlTier(mlModelTiers.t2);
+            const mlT3 = evaluateMlTier(mlModelTiers.t3);
+
+            const isT1T2Split = (mlT1.dir === 'Split' || mlT2.dir === 'Split' || (mlT1.dir !== 'None' && mlT2.dir !== 'None' && mlT1.dir !== mlT2.dir));
+
+            let mlTargetDir = 'Home';
+            let primaryMargin = 0;
+            let mlModelWinProb = 50;
+
+            if (mlT1.dir !== 'None' && mlT1.dir !== 'Split') {
+                mlTargetDir = mlT1.dir;
+                primaryMargin = mlT1.avgMargin;
+                mlModelWinProb = mlT1.winProb;
+            } else if (mlT2.dir !== 'None' && mlT2.dir !== 'Split') {
+                mlTargetDir = mlT2.dir;
+                primaryMargin = mlT2.avgMargin;
+                mlModelWinProb = mlT2.winProb;
+            } else {
+                if (modelAvgVal !== null) {
+                    mlTargetDir = modelAvgVal >= 0 ? 'Home' : 'Away';
+                    primaryMargin = Math.abs(modelAvgVal);
+                } else {
+                    mlTargetDir = 'Home';
+                    primaryMargin = 2.0;
+                }
+                mlModelWinProb = spreadToWinProb(Math.abs(effectiveModelSpread)) * 100;
+            }
+
+            let mlFinalAction = 'LEAN';
+            if (isT1T2Split) {
+                mlFinalAction = 'LEAN';
+            } else if (mlT1.dir !== 'None' && mlT1.dir !== 'Split' && mlT1.avgMargin >= 6.0) {
+                mlFinalAction = 'STRONG BET';
+            } else {
+                mlFinalAction = 'LEAN';
+            }
+
+            let marketHomeMl = game.espnHomeMl;
+            let marketAwayMl = game.espnAwayMl;
+            if (marketHomeMl === null || marketAwayMl === null) {
+                const spreadVal = liveLine !== null ? liveLine : 0;
+                marketHomeMl = winProbToAmericanMl(spreadToWinProb(spreadVal));
+                marketAwayMl = winProbToAmericanMl(1 - spreadToWinProb(spreadVal));
+            }
+
+            const targetMl = mlTargetDir === 'Home' ? marketHomeMl : marketAwayMl;
+            const impliedWinProb = americanMlToProb(targetMl) * 100;
+            const modelWinPct = mlTargetDir === 'Home' ? mlModelWinProb : (100 - mlModelWinProb > 50 ? 100 - mlModelWinProb : mlModelWinProb);
+            const edgePct = modelWinPct - impliedWinProb;
+
+            const targetMlTeam = mlTargetDir === 'Home' ? game.home : game.road;
+
+            game.mlResult = {
+                t1: mlT1,
+                t2: mlT2,
+                t3: mlT3,
+                targetDir: mlTargetDir,
+                targetTeam: targetMlTeam,
+                targetMl,
+                targetMlFormatted: formatAmericanMl(targetMl),
+                modelWinProb: modelWinPct,
+                impliedWinProb,
+                edgePct,
+                modelSpread: effectiveModelSpread,
+                margin: primaryMargin,
+                delta: primaryMargin,
+                finalAction: mlFinalAction,
+                actionLabel: mlFinalAction === 'STRONG BET' ? (targetMl > 0 ? 'VALUE UNDERDOG' : 'STRONG ML BET') : (targetMl > 0 ? 'DOG LEAN' : 'ML LEAN'),
+                isT1T2Split
+            };
+
+            // 3. TOTAL (OVER / UNDER) MULTI-TIER CONSENSUS ENGINE
+            const liveTotal = game.espnTotal !== null ? game.espnTotal : (parseNum(game.rawTotal?.total || game.rawTotal?.ou) || 44.5);
+            game.liveTotal = liveTotal;
+
+            const evaluateTotalTier = (modelKeys) => {
+                let overCount = 0, underCount = 0;
+                let edges = [];
+                let total = 0;
+
+                modelKeys.forEach(tKey => {
+                    const val = parseNum(getModelVal(game.rawTotal, tKey));
+                    if (val !== null && liveTotal !== null) {
+                        total++;
+                        const diff = val - liveTotal;
+                        edges.push(diff);
+                        if (diff > 0) overCount++;
+                        else if (diff < 0) underCount++;
+                    }
+                });
+
+                if (total === 0) return { total: 0, agreeCount: 0, avgEdge: 0, dir: 'None', status: 'NEUTRAL' };
+
+                const avgEdge = edges.length > 0 ? (edges.reduce((a, b) => a + b, 0) / edges.length) : 0;
+                const absAvgEdge = Math.abs(avgEdge);
+                const isTierStrong = absAvgEdge >= 2.5 && absAvgEdge <= 4.5;
+
+                if (overCount > underCount) {
+                    return { total, agreeCount: overCount, avgEdge, dir: 'OVER', status: isTierStrong ? 'STRONG' : 'LEAN' };
+                } else if (underCount > overCount) {
+                    return { total, agreeCount: underCount, avgEdge, dir: 'UNDER', status: isTierStrong ? 'STRONG' : 'LEAN' };
+                } else {
+                    return { total, agreeCount: overCount, avgEdge, dir: avgEdge >= 0 ? 'OVER' : 'UNDER', status: 'SPLIT' };
+                }
+            };
+
+            const totT1 = evaluateTotalTier(totalModelTiers.t1);
+            const totT2 = evaluateTotalTier(totalModelTiers.t2);
+            const totT3 = evaluateTotalTier(totalModelTiers.t3);
+
+            const allTotalKeys = [...totalModelTiers.t1, ...totalModelTiers.t2, ...totalModelTiers.t3];
+            let totalSum = 0, totalCount = 0;
+            allTotalKeys.forEach(tKey => {
+                const val = parseNum(getModelVal(game.rawTotal, tKey));
+                if (val !== null) {
+                    totalSum += val;
+                    totalCount++;
+                }
+            });
+
+            let totalDir = 'OVER';
+            let totalDelta = 0;
+
+            if (totT1.dir !== 'None' && totT1.dir !== 'Split') {
+                totalDir = totT1.dir;
+                totalDelta = totT1.avgEdge;
+            } else if (totT2.dir !== 'None' && totT2.dir !== 'Split') {
+                totalDir = totT2.dir;
+                totalDelta = totT2.avgEdge;
+            } else {
+                const avgVal = totalCount > 0 ? (totalSum / totalCount) : (liveTotal + 1.0);
+                totalDelta = avgVal - liveTotal;
+                totalDir = totalDelta >= 0 ? 'OVER' : 'UNDER';
+            }
+
+            const modelTotal = totalCount > 0 ? (totalSum / totalCount) : (liveTotal + totalDelta);
+            const absDelta = Math.abs(totalDelta);
+
+            let totalT3Downgrade = false;
+            if (totT3.dir !== 'None' && totT3.dir !== 'Split' && totT3.dir !== totalDir && (totT3.agreeCount / Math.max(1, totT3.total) >= 0.60)) {
+                totalT3Downgrade = true;
+            }
+
+            const isTotalStrong = (absDelta >= 2.5 && absDelta <= 4.5);
+            let totalAction = 'TOTAL LEAN';
+            if (isTotalStrong && !totalT3Downgrade) {
+                totalAction = totalDir === 'OVER' ? 'STRONG OVER' : 'STRONG UNDER';
+            } else {
+                totalAction = totalDir === 'OVER' ? 'OVER LEAN' : 'UNDER LEAN';
+            }
+
+            game.totalResult = {
+                t1: totT1,
+                t2: totT2,
+                t3: totT3,
+                modelTotal,
+                liveTotal,
+                delta: totalDelta,
+                absDelta,
+                direction: totalDir,
+                finalAction: totalAction,
+                pickText: `${totalDir} ${liveTotal}`,
+                t3Downgrade: totalT3Downgrade
+            };
+        };
+
+        // Process Spread & ML CSV and Total CSV
+        const mergeAndProcessDatasets = (spreadRows, totalRows) => {
+            const rawGames = [];
+
+            const findMatchingTotalRow = (homeName, roadName) => {
+                if (!totalRows || totalRows.length === 0) return null;
+                const homeCanon = canonicalizeNflTeam(homeName);
+                const roadCanon = canonicalizeNflTeam(roadName);
+
+                return totalRows.find(r => {
+                    const rHome = canonicalizeNflTeam(r.home || r.Home);
+                    const rRoad = canonicalizeNflTeam(r.road || r.Road || r.visitor || r.away);
+                    return (rHome === homeCanon && rRoad === roadCanon) || (rHome === roadCanon && rRoad === homeCanon);
+                });
+            };
+
+            const parseScoreField = (r, prefixList) => {
+                for (const p of prefixList) {
+                    for (const k of Object.keys(r)) {
+                        const cleanK = k.toLowerCase().replace(/[^a-z0-9]/g, '');
+                        if (cleanK === p || cleanK === 'score' + p || cleanK.includes(p)) {
+                            const val = parseNum(r[k]);
+                            if (val !== null) return val;
+                        }
+                    }
+                }
+                return null;
+            };
+
+            spreadRows.forEach((r, idx) => {
+                const home = r.home || r.Home || 'Home';
+                const road = r.road || r.Road || r.visitor || r.away || 'Away';
+                if (!home || home === 'home' || home === 'Home') return;
+
+                const matchedTotalRow = findMatchingTotalRow(home, road);
+
+                const gameObj = {
+                    id: idx,
+                    home,
+                    road,
+                    neutral: parseNum(r.neutral) || 0,
+                    rawSpread: r,
+                    rawTotal: matchedTotalRow || {},
+                    liveLine: null,
+                    espnLine: null,
+                    liveTotal: null,
+                    espnTotal: null,
+                    espnHomeMl: null,
+                    espnAwayMl: null,
+                    kickoffTimeMs: 0,
+                    kickoffFormatted: null,
+                    officialDate: null,
+                    showDeepDive: false,
+                    deepDiveTab: 'ratings',
+                    homeRecord: null,
+                    awayRecord: null,
+                    spreadResult: null,
+                    mlResult: null,
+                    totalResult: null
+                };
+
+                analyzeGame(gameObj);
+
+                // Auto-detect completed games already scored inside the user's primary Google Sheet
+                const awayScore = parseScoreField(r, ['rscore', 'roadscore', 'vscore', 'awayscore', 'scoreaway', 'rpts']);
+                const homeScore = parseScoreField(r, ['hscore', 'homescore', 'scorehome', 'hpts']);
+                if (awayScore !== null && homeScore !== null) {
+                    const gameDate = r.date ? getGameDateIso(r.date) : getTodayIso();
+                    gameObj.officialDate = gameDate;
+                    gradeSettledGame(gameObj, awayScore, homeScore);
+                } else {
+                    rawGames.push(gameObj);
+                }
+            });
+
+            games.value = rawGames;
+            showToast(`Loaded ${rawGames.length} NFL matchups with Spread, ML & Total data!`, 'success');
+            lastSyncTime.value = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+            fetchEspnScores();
+        };
+
+        const fetchCsvData = async (sheetId) => {
+            const gvizUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv`;
+            const exportUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv`;
+
+            const candidateUrls = [
+                gvizUrl,
+                exportUrl,
+                `https://api.allorigins.win/raw?url=${encodeURIComponent(gvizUrl)}`,
+                `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(gvizUrl)}`,
+                `https://corsproxy.io/?url=${encodeURIComponent(gvizUrl)}`
+            ];
+
+            for (const url of candidateUrls) {
+                try {
+                    const res = await fetch(url);
+                    if (res && res.ok) {
+                        const txt = await res.text();
+                        if (txt && (txt.includes('line') || txt.includes('home') || txt.includes('road') || txt.includes('total') || txt.includes('avg'))) {
+                            return txt;
+                        }
+                    }
+                } catch (e) {}
+            }
+            return null;
+        };
+
+        const fetchAllData = async () => {
+            loading.value = true;
+
+            const [spreadCsv, totalCsv] = await Promise.all([
+                fetchCsvData(spreadSheetId),
+                fetchCsvData(totalSheetId)
+            ]);
+
+            let parsedSpreadRows = [];
+            let parsedTotalRows = [];
+
+            if (spreadCsv) {
+                const results = Papa.parse(spreadCsv, { header: true, skipEmptyLines: true });
+                if (results?.data) parsedSpreadRows = results.data;
+            }
+
+            if (totalCsv) {
+                const results = Papa.parse(totalCsv, { header: true, skipEmptyLines: true });
+                if (results?.data) parsedTotalRows = results.data;
+            }
+
+            if (parsedSpreadRows.length === 0) {
+                parsedSpreadRows = [
+                    { road: 'Ravens', home: 'Chiefs', line: '3.0', lineeff: '4.8', linecong: '4.5', lineclean: '4.6', lineffw: '4.2', linel2: '4.5', linecoff: '4.1', linelog: '4.0', linepi: '4.3', linedonchess: '4.5', linepyth: '4.2', linel1: '4.0', linemed: '4.2', linedok: '4.0', linecurry: '4.2', lineavg: '4.3', linemass: '4.2', lineppg: '4.0', lineespn: '4.8', linesaggm: '4.5', linesag: '4.6' },
+                    { road: 'Bills', home: 'Lions', line: '3.5', lineeff: '-0.5', linecong: '0.2', lineclean: '-0.2', lineffw: '0.0', linel2: '-0.5', linecoff: '-0.8', linelog: '-0.5', linepi: '-0.4', linedonchess: '0.0', linepyth: '-0.2', linel1: '-0.5', linemed: '-0.2', linedok: '-1.0', linecurry: '0.0', lineavg: '-0.2', linemass: '-0.5', lineppg: '0.5', lineespn: '0.2', linesaggm: '-0.2', linesag: '0.0' },
+                    { road: 'Eagles', home: 'Cowboys', line: '-4.5', lineeff: '-8.5', linecong: '-8.2', lineclean: '-8.6', lineffw: '-8.0', linel2: '-8.4', linecoff: '-8.1', linelog: '-7.9', linepi: '-8.5', linedonchess: '-8.0', linepyth: '-8.2', linel1: '-8.0', linemed: '-8.2', linedok: '-8.0', linecurry: '-8.2', lineavg: '-8.2', linemass: '-8.4', lineppg: '-7.8', lineespn: '-8.2', linesaggm: '-8.5', linesag: '-8.0' },
+                    { road: 'Steelers', home: 'Bengals', line: '2.5', lineeff: '-1.8', linecong: '-2.0', lineclean: '-1.9', lineffw: '-2.2', linel2: '-2.0', linecoff: '-1.5', linelog: '-1.8', linepi: '-2.0', linedonchess: '-1.6', linepyth: '-1.8', linel1: '-1.5', linemed: '-1.8', linedok: '-1.5', linecurry: '-1.9', lineavg: '-1.8', linemass: '-2.0', lineppg: '-1.5', lineespn: '-2.5', linesaggm: '-1.8', linesag: '-1.8' },
+                    { road: 'Packers', home: 'Vikings', line: '1.5', lineeff: '3.1', linecong: '2.8', lineclean: '3.0', lineffw: '2.7', linel2: '2.9', linecoff: '2.8', linelog: '3.0', linepi: '2.9', linedonchess: '3.2', linepyth: '2.9', linel1: '3.0', linemed: '2.9', linedok: '3.0', linecurry: '2.8', lineavg: '2.9', linemass: '2.6', lineppg: '2.5', lineespn: '2.8', linesaggm: '3.1', linesag: '3.0' },
+                    { road: 'Texans', home: 'Chargers', line: '2.5', lineeff: '5.2', linecong: '4.8', lineclean: '5.0', lineffw: '4.7', linel2: '4.9', linecoff: '4.8', linelog: '5.0', linepi: '4.9', linedonchess: '5.1', linepyth: '4.9', linel1: '4.8', linemed: '4.9', linedok: '4.5', linecurry: '5.0', lineavg: '4.9', linemass: '5.2', lineppg: '4.6', lineespn: '4.8', linesaggm: '5.0', linesag: '4.6' }
+                ];
+                parsedTotalRows = [
+                    { road: 'Ravens', home: 'Chiefs', total: '47.5', totdonchess: '52.0', totturing: '51.5', totffw: '52.5', totpugh: '51.0', totavg: '51.8', totmed: '51.5', totmass: '52.5', totclean: '51.2', totargh: '52.0', totpirate: '51.8', totsag: '52.0', totrwp: '51.4', totashby: '51.9', totcurry: '52.1', totkerns: '51.7' },
+                    { road: 'Bills', home: 'Lions', total: '54.5', totdonchess: '59.0', totturing: '60.0', totffw: '59.5', totpugh: '58.5', totavg: '59.2', totmed: '59.0', totmass: '59.0', totclean: '58.8', totargh: '59.5', totpirate: '59.1', totsag: '58.5', totrwp: '59.0', totashby: '59.4', totcurry: '59.2', totkerns: '59.6' },
+                    { road: 'Eagles', home: 'Cowboys', total: '45.0', totdonchess: '41.0', totturing: '41.5', totffw: '40.5', totpugh: '41.2', totavg: '41.2', totmed: '41.0', totmass: '41.0', totclean: '41.4', totargh: '40.8', totpirate: '41.1', totsag: '40.8', totrwp: '41.3', totashby: '41.0', totcurry: '41.5', totkerns: '40.9' },
+                    { road: 'Steelers', home: 'Bengals', total: '43.5', totdonchess: '45.0', totturing: '44.5', totffw: '45.2', totpugh: '44.8', totavg: '44.8', totmed: '44.5', totmass: '45.5', totclean: '44.6', totargh: '45.0', totpirate: '44.9', totsag: '45.0', totrwp: '44.7', totashby: '44.9', totcurry: '45.1', totkerns: '44.8' },
+                    { road: 'Packers', home: 'Vikings', total: '44.0', totdonchess: '49.0', totturing: '48.5', totffw: '48.8', totpugh: '48.2', totavg: '48.5', totmed: '48.5', totmass: '48.8', totclean: '48.4', totargh: '48.9', totpirate: '48.6', totsag: '49.0', totrwp: '48.4', totashby: '48.7', totcurry: '48.9', totkerns: '48.5' },
+                    { road: 'Texans', home: 'Chargers', total: '42.5', totdonchess: '37.5', totturing: '38.0', totffw: '38.2', totpugh: '37.8', totavg: '38.0', totmed: '38.0', totmass: '38.5', totclean: '38.1', totargh: '37.9', totpirate: '38.0', totsag: '37.5', totrwp: '38.2', totashby: '37.8', totcurry: '38.3', totkerns: '37.7' }
+                ];
+            }
+
+            mergeAndProcessDatasets(parsedSpreadRows, parsedTotalRows);
+            loading.value = false;
+        };
+
+        // Live ESPN NFL Scoreboard & Live Lines Integration
+        const fetchEspnScores = async () => {
+            const currentYear = new Date().getFullYear();
+            const seasonStartYear = (new Date().getMonth() < 2) ? currentYear - 1 : currentYear;
+
+            const urls = [
+                `https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard?limit=100`,
+                `https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard?limit=500&dates=${seasonStartYear}0901-${seasonStartYear + 1}0228`
+            ];
+
+            let eventsMap = new Map();
+            for (const url of urls) {
+                const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
+                try {
+                    let res = await fetch(url).catch(() => null);
+                    if (!res || !res.ok) res = await fetch(proxyUrl).catch(() => null);
+                    if (res && res.ok) {
+                        const data = await res.json();
+                        if (data?.events && Array.isArray(data.events)) {
+                            data.events.forEach(ev => {
+                                if (ev?.id && !eventsMap.has(ev.id)) {
+                                    eventsMap.set(ev.id, ev);
+                                }
+                            });
+                        }
+                    }
+                } catch (e) {}
+            }
+
+            const events = Array.from(eventsMap.values());
+            if (events.length === 0) return;
+
+            const parseCompScore = (comp) => {
+                if (!comp || comp.score === undefined || comp.score === null || comp.score === '') return null;
+                const s = parseInt(comp.score, 10);
+                return isNaN(s) ? null : s;
+            };
+
+            const teamMatches = (sheetTeam, espnComp) => {
+                if (!sheetTeam || !espnComp?.team) return false;
+                const sCanon = canonicalizeNflTeam(sheetTeam);
+                const team = espnComp.team;
+                const candidates = [team.displayName, team.shortDisplayName, team.location, team.name, team.abbreviation];
+                return candidates.some(c => canonicalizeNflTeam(c) === sCanon);
+            };
+
+            games.value.forEach(g => {
+                for (const ev of events) {
+                    const comps = ev.competitions?.[0]?.competitors;
+                    if (!comps || comps.length < 2) continue;
+
+                    const homeComp = comps.find(c => c.homeAway === 'home') || comps[0];
+                    const awayComp = comps.find(c => c.homeAway === 'away') || comps[1];
+
+                    if (teamMatches(g.home, homeComp) && teamMatches(g.road, awayComp)) {
+                        if (ev.date) {
+                            const dObj = new Date(ev.date);
+                            g.kickoffTimeMs = dObj.getTime();
+                            g.kickoffFormatted = dObj.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+                            g.officialDate = getGameDateIso(ev.date);
+                        }
+
+                        if (homeComp?.records?.[0]?.summary) g.homeRecord = homeComp.records[0].summary;
+                        if (awayComp?.records?.[0]?.summary) g.awayRecord = awayComp.records[0].summary;
+
+                        const odds = ev.competitions?.[0]?.odds?.[0];
+                        if (odds) {
+                            if (typeof odds.spread === 'number') g.espnLine = -odds.spread;
+                            if (typeof odds.overUnder === 'number') g.espnTotal = odds.overUnder;
+                            if (odds.homeTeamOdds?.moneyLine) g.espnHomeMl = odds.homeTeamOdds.moneyLine;
+                            if (odds.awayTeamOdds?.moneyLine) g.espnAwayMl = odds.awayTeamOdds.moneyLine;
+                        }
+
+                        const status = ev.status || {};
+                        const state = String(status.type?.state || '').toLowerCase();
+                        const isPre = state === 'pre';
+                        const isCompleted = state === 'post' || status.type?.completed === true;
+                        const isLive = !isPre && !isCompleted;
+                        const period = status.period || 0;
+                        const displayClock = status.displayClock || '0:00';
+                        const clock = status.clock || 0;
+                        const detail = isCompleted ? 'Final' : (status.type?.detail || (isLive ? `Q${period} ${displayClock}` : 'Scheduled'));
+
+                        const awayScore = parseCompScore(awayComp);
+                        const homeScore = parseCompScore(homeComp);
+
+                        const sit = ev.competitions?.[0]?.situation;
+                        const sitText = sit?.downDistanceText || null;
+
+                        const key = `${g.road}__${g.home}`;
+                        liveGameStatusMap.value[key] = {
+                            awayScore,
+                            homeScore,
+                            detail,
+                            period,
+                            displayClock,
+                            clock,
+                            situation: sitText,
+                            startTime: g.kickoffFormatted,
+                            isPre,
+                            isLive,
+                            isCompleted
+                        };
+
+                        if (isCompleted && awayScore !== null && homeScore !== null) {
+                            gradeSettledGame(g, awayScore, homeScore);
+                        }
+
+                        analyzeGame(g);
+                        break;
+                    }
+                }
+            });
+        };
+
+        const gradeSettledGame = (game, awayScore, homeScore) => {
+            const actualHomeMargin = homeScore - awayScore;
+            const actualTotalPoints = homeScore + awayScore;
+
+            let spreadGrade = 'P';
+            const line = game.liveLine !== null ? game.liveLine : 0;
+            if (game.spreadResult.finalDir === 'Home') {
+                if (actualHomeMargin > line) spreadGrade = 'W';
+                else if (actualHomeMargin < line) spreadGrade = 'L';
+            } else {
+                if (actualHomeMargin < line) spreadGrade = 'W';
+                else if (actualHomeMargin > line) spreadGrade = 'L';
+            }
+
+            let mlGrade = 'L';
+            if (game.mlResult.targetDir === 'Home' && homeScore > awayScore) mlGrade = 'W';
+            else if (game.mlResult.targetDir === 'Away' && awayScore > homeScore) mlGrade = 'W';
+            else if (homeScore === awayScore) mlGrade = 'P';
+
+            let totalGrade = 'P';
+            const marketTotal = game.liveTotal !== null ? game.liveTotal : 44.5;
+            if (game.totalResult.direction === 'OVER') {
+                if (actualTotalPoints > marketTotal) totalGrade = 'W';
+                else if (actualTotalPoints < marketTotal) totalGrade = 'L';
+            } else {
+                if (actualTotalPoints < marketTotal) totalGrade = 'W';
+                else if (actualTotalPoints > marketTotal) totalGrade = 'L';
+            }
+
+            const gameDate = game.officialDate || getTodayIso();
+            const docId = `${canonicalizeNflTeam(game.road)}_${canonicalizeNflTeam(game.home)}_${gameDate}`.replace(/[^a-zA-Z0-9_-]/g, '_');
+
+            const record = {
+                date: gameDate,
+                road: game.road,
+                home: game.home,
+                awayScore,
+                homeScore,
+                spreadPick: `${game.spreadResult?.targetTeam} ${formatBetSpread(game.liveLine, game.spreadResult?.finalDir)}`,
+                spreadSignal: game.spreadResult?.finalAction,
+                spreadGrade,
+                mlPick: `${game.mlResult?.targetTeam} (${game.mlResult?.targetMlFormatted})`,
+                mlSignal: game.mlResult?.finalAction,
+                mlMargin: game.mlResult?.margin,
+                mlGrade,
+                totalPick: game.totalResult?.pickText || '—',
+                totalSignal: game.totalResult?.finalAction,
+                totalGrade,
+                hasSettled: true,
+                updatedAt: new Date().toISOString()
+            };
+
+            settledGrades.value[docId] = record;
+            saveSettledPlayToCloud(docId, record);
+        };
+
+        const getGameKey = (game) => `${game.road}__${game.home}`;
+        const getGameLiveStatus = (game) => liveGameStatusMap.value[getGameKey(game)] || null;
+
+        const getGameSettledGrades = (game) => {
+            const gameDate = game.officialDate || getTodayIso();
+            const docId = `${canonicalizeNflTeam(game.road)}_${canonicalizeNflTeam(game.home)}_${gameDate}`.replace(/[^a-zA-Z0-9_-]/g, '_');
+            return settledGrades.value[docId] || settledGrades.value[`${game.road}__${game.home}`] || {};
+        };
+
+        const isGameLive = (game) => {
+            const st = getGameLiveStatus(game);
+            return !!(st && st.isLive && !st.isPre && !st.isCompleted);
+        };
+
+        const liveGamesCount = computed(() => {
+            return Object.values(liveGameStatusMap.value).filter(s => s && s.isLive).length;
+        });
+
+        const getDisplayScore = (game) => {
+            const live = getGameLiveStatus(game);
+            const settled = getGameSettledGrades(game);
+            return {
+                away: live?.awayScore ?? settled?.awayScore ?? '—',
+                home: live?.homeScore ?? settled?.homeScore ?? '—'
+            };
+        };
+
+        const calculateLiveSpreadProb = (game) => {
+            const liveStatus = getGameLiveStatus(game);
+            if (!liveStatus || !liveStatus.isLive || liveStatus.awayScore === null || liveStatus.homeScore === null) return null;
+            const line = game.liveLine !== null ? game.liveLine : 0;
+            const currentMargin = liveStatus.homeScore - liveStatus.awayScore;
+
+            let elapsedSec = 0;
+            const period = Math.max(1, Math.min(4, liveStatus.period || 1));
+            const clockRemInQtr = typeof liveStatus.clock === 'number' ? liveStatus.clock : 900;
+            elapsedSec = (period - 1) * 900 + (900 - clockRemInQtr);
+            elapsedSec = Math.max(30, Math.min(3570, elapsedSec));
+
+            const fElapsed = elapsedSec / 3600;
+            const fRem = (3600 - elapsedSec) / 3600;
+
+            const expectedElapsedMargin = fElapsed * line;
+            const sigmaRem = Math.max(1.5, 13.5 * Math.sqrt(fRem));
+
+            let coverDiff = 0;
+            if (game.spreadResult.finalDir === 'Home') {
+                coverDiff = currentMargin - expectedElapsedMargin;
+            } else {
+                coverDiff = -(currentMargin - expectedElapsedMargin);
+            }
+
+            const z = coverDiff / sigmaRem;
+            let prob = normalCDF(z) * 100;
+            prob = Math.max(1.0, Math.min(99.0, prob));
+
+            return {
+                pct: Math.round(prob * 10) / 10,
+                label: `${(Math.round(prob * 10) / 10).toFixed(1)}%`,
+                coverDiff: Math.round(coverDiff * 10) / 10
+            };
+        };
+
+        const calculateLiveTotalPace = (game) => {
+            const liveStatus = getGameLiveStatus(game);
+            if (!liveStatus || liveStatus.awayScore === null || liveStatus.homeScore === null) return '—';
+            const currPoints = (liveStatus.awayScore || 0) + (liveStatus.homeScore || 0);
+            const period = Math.max(1, Math.min(4, liveStatus.period || 1));
+            const elapsed = Math.max(1, (period - 1) * 15 + (15 - ((liveStatus.clock || 900) / 60)));
+            const pace = (currPoints / elapsed) * 60;
+            return pace.toFixed(1);
+        };
+
+        const getWinProbTextColor = (pct) => {
+            if (pct >= 65) return 'text-emerald-400';
+            if (pct >= 45) return 'text-amber-400';
+            return 'text-rose-400';
+        };
+
+        const getWinProbBarColor = (pct) => {
+            if (pct >= 65) return 'bg-gradient-to-r from-emerald-600 to-emerald-400';
+            if (pct >= 45) return 'bg-gradient-to-r from-amber-600 to-amber-400';
+            return 'bg-gradient-to-r from-rose-600 to-rose-400';
+        };
+
+        const getDeltaBadgeClass = (delta) => {
+            if (delta >= 2.5) return 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40';
+            return 'bg-sky-500/20 text-sky-300 border-sky-500/40';
+        };
+
+        const getMlDeltaBadgeClass = (margin) => {
+            if (margin === null || margin === undefined) return 'bg-slate-800 text-slate-400 border-slate-700';
+            if (margin >= 6.0) return 'bg-amber-500/20 text-amber-300 border-amber-500/40';
+            return 'bg-sky-500/20 text-sky-300 border-sky-500/40';
+        };
+
+        const getTotalDeltaBadgeClass = (delta) => {
+            const d = Math.abs(parseNum(delta) || 0);
+            if (d >= 2.5 && d <= 4.5) return 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40';
+            return 'bg-slate-800 text-slate-300 border-slate-700';
+        };
+
+        const getSpreadBoxClasses = (res) => {
+            if (!res) return 'border-slate-800 bg-slate-950/60';
+            if (res.finalAction === 'STRONG BET') return 'border-emerald-600/70 bg-emerald-950/20 text-emerald-100 shadow-sm shadow-emerald-950/30';
+            return 'border-sky-600/50 bg-sky-950/20 text-sky-100';
+        };
+
+        const getMlBoxClasses = (res) => {
+            if (!res) return 'border-slate-800 bg-slate-950/60';
+            if (res.finalAction === 'STRONG BET' || res.delta >= 3.0) {
+                return 'border-amber-600/70 bg-amber-950/20 text-amber-100 shadow-sm shadow-amber-950/30';
+            }
+            return 'border-slate-700 bg-slate-950/40 text-slate-200';
+        };
+
+        const getTotalBoxClasses = (res) => {
+            if (!res) return 'border-slate-800 bg-slate-950/60';
+            if (res.finalAction.includes('STRONG')) {
+                return 'border-cyan-600/70 bg-cyan-950/20 text-cyan-100 shadow-sm shadow-cyan-950/30';
+            }
+            return 'border-slate-700 bg-slate-950/40 text-slate-200';
+        };
+
+        const getOutcomeBadgeClass = (grade) => {
+            if (grade === 'W') return 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40';
+            if (grade === 'L') return 'bg-rose-500/20 text-rose-300 border-rose-500/40';
+            if (grade === 'P') return 'bg-amber-500/20 text-amber-300 border-amber-500/40';
+            return 'bg-slate-800 text-slate-400 border-slate-700';
+        };
+
+        const getModelCellClass = (valStr, liveLine) => {
+            const val = parseNum(valStr);
+            const line = parseNum(liveLine);
+            if (val === null || line === null) return 'border-slate-800 text-slate-500 bg-slate-950/50';
+            if (val > line) return 'border-emerald-900/60 bg-emerald-950/20 text-emerald-300';
+            if (val < line) return 'border-sky-900/60 bg-sky-950/20 text-sky-300';
+            return 'border-slate-800 text-slate-400 bg-slate-950/50';
+        };
+
+        const getMlModelCellClass = (valStr) => {
+            const val = parseNum(valStr);
+            if (val === null) return 'border-slate-800 text-slate-500 bg-slate-950/50';
+            if (val > 0) return 'border-emerald-900/60 bg-emerald-950/20 text-emerald-300';
+            if (val < 0) return 'border-sky-900/60 bg-sky-950/20 text-sky-300';
+            return 'border-slate-800 text-slate-400 bg-slate-950/50';
+        };
+
+        const getTotalModelCellClass = (valStr, liveTotal) => {
+            const val = parseNum(valStr);
+            const total = parseNum(liveTotal);
+            if (val === null || total === null) return 'border-slate-800 text-slate-500 bg-slate-950/50';
+            if (val > total) return 'border-emerald-900/60 bg-emerald-950/20 text-emerald-300';
+            if (val < total) return 'border-cyan-900/60 bg-cyan-950/20 text-cyan-300';
+            return 'border-slate-800 text-slate-400 bg-slate-950/50';
+        };
+
+        const getTotalModelDiffLabel = (valStr, liveTotal) => {
+            const val = parseNum(valStr);
+            const total = parseNum(liveTotal);
+            if (val === null || total === null) return '—';
+            const diff = val - total;
+            if (diff > 0) return `OVER (+${diff.toFixed(1)})`;
+            if (diff < 0) return `UNDER (${diff.toFixed(1)})`;
+            return `PUSH (0.0)`;
+        };
+
+        const getModelWinnerLabel = (valStr, home, road) => {
+            const num = parseNum(valStr);
+            if (num === null) return '—';
+            if (num > 0) return home || 'Home';
+            if (num < 0) return road || 'Away';
+            return 'PK / Tie';
+        };
+
+        const sortGamesByTime = (list) => {
+            return [...list].sort((a, b) => {
+                const aTime = a.kickoffTimeMs || 9999999999999;
+                const bTime = b.kickoffTimeMs || 9999999999999;
+                return aTime - bTime;
+            });
+        };
+
+        const filteredGames = computed(() => {
+            if (!games.value || !Array.isArray(games.value)) return [];
+            let list = [...games.value];
+
+            if (searchQuery.value) {
+                list = list.filter(g => gameMatchesSearch(g, searchQuery.value));
+            }
+
+            if (quickFilter.value === 'live') {
+                list = list.filter(g => isGameLive(g));
+            } else if (quickFilter.value === 'strongSpread') {
+                list = list.filter(g => g.spreadResult && g.spreadResult.finalAction === 'STRONG BET');
+            } else if (quickFilter.value === 'strongMl') {
+                list = list.filter(g => g.mlResult && g.mlResult.finalAction === 'STRONG BET');
+            } else if (quickFilter.value === 'strongTotal') {
+                list = list.filter(g => g.totalResult && g.totalResult.finalAction && g.totalResult.finalAction.includes('STRONG'));
+            }
+
+            return sortGamesByTime(list);
+        });
+
+        const analyzedGames = computed(() => {
+            if (!games.value) return [];
+            return games.value.filter(g => g.spreadResult && g.spreadResult.finalAction !== 'OFF');
+        });
+
+        const strongSpreadCount = computed(() => {
+            return (games.value || []).filter(g => g.spreadResult?.finalAction === 'STRONG BET').length;
+        });
+
+        const strongMlCount = computed(() => {
+            return (games.value || []).filter(g => g.mlResult?.finalAction === 'STRONG BET').length;
+        });
+
+        const strongTotalCount = computed(() => {
+            return (games.value || []).filter(g => g.totalResult?.finalAction?.includes('STRONG')).length;
+        });
+
+        const summaryList = computed(() => {
+            let list = games.value || [];
+            if (searchQuery.value) {
+                list = list.filter(g => gameMatchesSearch(g, searchQuery.value));
+            }
+            return sortGamesByTime(list);
+        });
+
+        // Performance Records Calculation with Timeframe Filter & Week Filter
+        const computeLedgerRecord = (gradeField) => {
+            let w = 0, l = 0, p = 0;
+            Object.values(settledGrades.value).forEach(item => {
+                if (!item || !isDateInTimeframe(item.date, activeTimeframe.value)) return;
+                if (selectedWeek.value !== 'all' && String(item.week) !== String(selectedWeek.value)) return;
+                
+                // Signal filter check
+                if (recordSignalFilter.value === 'strong') {
+                    if (gradeField === 'spreadGrade' && item.spreadSignal !== 'STRONG BET') return;
+                    if (gradeField === 'mlGrade' && item.mlSignal !== 'STRONG BET') return;
+                    if (gradeField === 'totalGrade' && !item.totalSignal?.includes('STRONG')) return;
+                } else if (recordSignalFilter.value === 'lean') {
+                    if (gradeField === 'spreadGrade' && item.spreadSignal === 'STRONG BET') return;
+                    if (gradeField === 'mlGrade' && item.mlSignal === 'STRONG BET') return;
+                    if (gradeField === 'totalGrade' && item.totalSignal?.includes('STRONG')) return;
+                }
+
+                const g = item[gradeField];
+                if (g === 'W') w++;
+                else if (g === 'L') l++;
+                else if (g === 'P') p++;
+            });
+            const decided = w + l;
+            const winPct = decided > 0 ? ((w / decided) * 100).toFixed(1) : '0.0';
+            return { w, l, p, total: w + l + p, winPct };
+        };
+
+        const spreadRecord = computed(() => computeLedgerRecord('spreadGrade'));
+        const mlRecord = computed(() => computeLedgerRecord('mlGrade'));
+        const totalRecord = computed(() => computeLedgerRecord('totalGrade'));
+
+        const allTimeOverallRecord = computed(() => {
+            let w = 0, l = 0, p = 0;
+            Object.values(settledGrades.value).forEach(item => {
+                if (!item) return;
+                ['spreadGrade', 'mlGrade', 'totalGrade'].forEach(f => {
+                    if (item[f] === 'W') w++;
+                    else if (item[f] === 'L') l++;
+                    else if (item[f] === 'P') p++;
+                });
+            });
+            return { w, l, p };
+        });
+
+        const filteredGradedPlays = computed(() => {
+            const rows = [];
+            Object.entries(settledGrades.value).forEach(([k, item]) => {
+                if (!item || !isDateInTimeframe(item.date, activeTimeframe.value)) return;
+                if (selectedWeek.value !== 'all' && String(item.week) !== String(selectedWeek.value)) return;
+
+                if (recordMarketFilter.value === 'all' || recordMarketFilter.value === 'spread') {
+                    const matchesSignal = recordSignalFilter.value === 'all' || 
+                        (recordSignalFilter.value === 'strong' && item.spreadSignal === 'STRONG BET') ||
+                        (recordSignalFilter.value === 'lean' && item.spreadSignal !== 'STRONG BET');
+
+                    if (matchesSignal) {
+                        rows.push({
+                            key: k + '_spread',
+                            date: item.date || 'Past Game',
+                            week: item.week || null,
+                            market: 'SPREAD',
+                            road: item.road,
+                            home: item.home,
+                            signal: item.spreadSignal || 'LEAN',
+                            pick: item.spreadPick,
+                            awayScore: item.awayScore,
+                            homeScore: item.homeScore,
+                            grade: item.spreadGrade
+                        });
+                    }
+                }
+
+                if (recordMarketFilter.value === 'all' || recordMarketFilter.value === 'ml') {
+                    const matchesSignal = recordSignalFilter.value === 'all' || 
+                        (recordSignalFilter.value === 'strong' && item.mlSignal === 'STRONG BET') ||
+                        (recordSignalFilter.value === 'lean' && item.mlSignal !== 'STRONG BET');
+
+                    if (matchesSignal) {
+                        rows.push({
+                            key: k + '_ml',
+                            date: item.date || 'Past Game',
+                            week: item.week || null,
+                            market: 'ML',
+                            road: item.road,
+                            home: item.home,
+                            signal: item.mlSignal || 'LEAN',
+                            pick: item.mlPick,
+                            awayScore: item.awayScore,
+                            homeScore: item.homeScore,
+                            grade: item.mlGrade
+                        });
+                    }
+                }
+
+                if (recordMarketFilter.value === 'all' || recordMarketFilter.value === 'total') {
+                    const isStrong = item.totalSignal?.includes('STRONG');
+                    const matchesSignal = recordSignalFilter.value === 'all' || 
+                        (recordSignalFilter.value === 'strong' && isStrong) ||
+                        (recordSignalFilter.value === 'lean' && !isStrong);
+
+                    if (matchesSignal) {
+                        rows.push({
+                            key: k + '_total',
+                            date: item.date || 'Past Game',
+                            week: item.week || null,
+                            market: 'TOTAL',
+                            road: item.road,
+                            home: item.home,
+                            signal: item.totalSignal || 'TOTAL LEAN',
+                            pick: item.totalPick,
+                            awayScore: item.awayScore,
+                            homeScore: item.homeScore,
+                            grade: item.totalGrade
+                        });
+                    }
+                }
+            });
+            return rows.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+        });
+
+        const copySummaryToClipboard = () => {
+            if (!summaryList.value || summaryList.value.length === 0) return;
+            let text = `🏈 NFL ANALYZER - CONSENSUS PICKS & RECOMMENDATIONS\n`;
+            text += `Generated: ${new Date().toLocaleString()}\n`;
+            text += `=================================================================\n\n`;
+
+            summaryList.value.forEach(g => {
+                text += `MATCHUP: ${g.road} @ ${g.home} (Kickoff: ${g.kickoffFormatted || 'TBD'})\n`;
+                text += `  • SPREAD: ${g.spreadResult.targetTeam} ${formatBetSpread(g.liveLine, g.spreadResult.finalDir)} [${g.spreadResult.finalAction} | Δ ${formatDeltaNum(g.spreadResult.delta)} pts]\n`;
+                text += `  • ML:     ${g.mlResult.targetTeam} (${g.mlResult.targetMlFormatted}) [${g.mlResult.finalAction} | Proj Margin: ${formatDeltaNum(g.mlResult.margin)} pts${g.mlResult.isT1T2Split ? ' | T1/T2 Winner Split' : ''} | EV +${(g.mlResult.edgePct || 0).toFixed(1)}%]\n`;
+                text += `  • TOTAL:  ${g.totalResult.pickText} [${g.totalResult.finalAction} | Proj ${g.totalResult.modelTotal.toFixed(1)}]\n\n`;
+            });
+
+            const textArea = document.createElement('textarea');
+            textArea.value = text;
+            document.body.appendChild(textArea);
+            textArea.select();
+            try {
+                document.execCommand('copy');
+                copyButtonText.value = 'Copied to Clipboard! ✓';
+                setTimeout(() => { copyButtonText.value = 'Copy All Recommendations'; }, 2500);
+            } catch (e) {}
+            document.body.removeChild(textArea);
+        };
+
+        const startAutoRefresh = () => {
+            if (autoRefreshTimer) clearInterval(autoRefreshTimer);
+            autoRefreshTimer = setInterval(() => {
+                if (autoRefresh.value) fetchEspnScores();
+            }, 30000);
+        };
+
+        onMounted(() => {
+            initFirebase();
+            fetchAllData();
+            autoSyncHistoricalSeasonFromSheets();
+            startAutoRefresh();
+        });
+
+        onUnmounted(() => {
+            if (autoRefreshTimer) clearInterval(autoRefreshTimer);
+        });
+
+        return {
+            games,
+            loading,
+            autoRefresh,
+            lastSyncTime,
+            activeTab,
+            searchQuery,
+            quickFilter,
+            activeViewMode,
+            viewModes,
+            filterOptions,
+            activeTimeframe,
+            timeframeOptions,
+            recordMarketFilter,
+            recordSignalFilter,
+            selectedWeek,
+            availableWeeks,
+            isHistoricalSyncing,
+            toastMessage,
+            toastType,
+            copyButtonText,
+            cloudSyncStatus,
+            spreadModelTiers,
+            mlModelTiers,
+            totalModelTiers,
+            filteredGames,
+            analyzedGames,
+            summaryList,
+            strongSpreadCount,
+            strongMlCount,
+            strongTotalCount,
+            spreadRecord,
+            mlRecord,
+            totalRecord,
+            allTimeOverallRecord,
+            filteredGradedPlays,
+            liveGamesCount,
+            getTeamRatings,
+            getModelVal,
+            formatMetric,
+            formatDeltaNum,
+            formatTotalNum,
+            formatModelLabel,
+            formatTotalModelLabel,
+            formatFavoredLabel,
+            formatBetSpread,
+            getDeltaBadgeClass,
+            getMlDeltaBadgeClass,
+            getTotalDeltaBadgeClass,
+            getSpreadBoxClasses,
+            getMlBoxClasses,
+            getTotalBoxClasses,
+            getOutcomeBadgeClass,
+            getModelCellClass,
+            getMlModelCellClass,
+            getTotalModelCellClass,
+            getTotalModelDiffLabel,
+            getModelWinnerLabel,
+            getGameLiveStatus,
+            getGameSettledGrades,
+            getDisplayScore,
+            isGameLive,
+            calculateLiveSpreadProb,
+            calculateLiveTotalPace,
+            getWinProbTextColor,
+            getWinProbBarColor,
+            fetchAllData,
+            copySummaryToClipboard,
+            autoSyncHistoricalSeasonFromSheets
+        };
+    }
+}).mount('#app');
+</script>
+</body>
+</html>
